@@ -188,18 +188,28 @@
                     layer.on('click', function(e) {
                         L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e);
                         
-                        // 🚀 CORE-FIX: Wenn dieselbe Parzelle nochmals geklickt wird, deaktivieren wir sie!
-                        if (typeof window.vinicoreZuletztAktiveGruenUuid !== 'undefined' && window.vinicoreZuletztAktiveGruenUuid === feature.properties.uuid) {
-                            window.vinicoreZuletztAktiveGruenUuid = null; // Gedächtnis löschen
-                            geojsonLayer.resetStyle(layer);              // Farbe zurücksetzen
-                            rendereSammlerInspektor();                    // Inspektor leeren / Korb anzeigen
+                        // 🎯 REVISIONS-SCHILD: Zieht die echte UUID aus den Properties, egal wie der Schlüssel heißt!
+                        const echteUuid = feature.properties.parzelle_uuid || feature.properties.uuid;
+
+                        if (!echteUuid || echteUuid === 'undefined') {
+                            console.error("Kritisch: Keine gültige UUID im GeoJSON gefunden!");
+                            return;
+                        }
+
+                        // 💥 DIAGNOSE-ALARM ENTFERNT – Wir übergeben die verifizierte ID!
+                        if (typeof window.vinicoreZuletztAktiveGruenUuid !== 'undefined' && window.vinicoreZuletztAktiveGruenUuid === echteUuid) {
+                            window.vinicoreZuletztAktiveGruenUuid = null;
+                            geojsonLayer.resetStyle(layer);
+                            rendereSammlerInspektor();
                         } else {
-                            // Andernfalls: Alle anderen Flächen zurücksetzen und die neue Fläche aktivieren
                             geojsonLayer.eachLayer(l => geojsonLayer.resetStyle(l));
                             layer.setStyle({ fillColor: '#047857', fillOpacity: 0.65, weight: 3.5, color: '#065f46' });
-                            rendereSammlerInspektor(feature.properties.uuid);
+                            
+                            // Zündet den Detail-Tunnel mit der realen ID
+                            rendereSammlerInspektor(echteUuid);
                         }
                     });
+
 
                 }
             }).addTo(map);
@@ -244,130 +254,96 @@
                     map.removeLayer(umgebungsWfsLayer);
                 }
 
-            umgebungsWfsLayer = L.geoJSON(data, {
-                style: function(feature) {
-                    const props = feature.properties;
-                    const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
-                    
-                    // 1. CHECK: Existiert diese Fläche bereits in unseren GRÜNEN Beständen (in der Datenbank)?
-                    let bereitsImBestand = false;
-                    if (typeof geojsonLayer !== 'undefined' && geojsonLayer) {
-                        geojsonLayer.eachLayer(function(bl) {
-                            const bp = bl.feature.properties;
-                            const bId = bp.gemarkung + '-' + bp.flur + '-' + (bp.flurstueck || bp.flurstueck_zaehler);
-                            if (bId === flurstueckId) {
-                                bereitsImBestand = true;
+                umgebungsWfsLayer = L.geoJSON(data, {
+                    style: function(feature) {
+                        const props = feature.properties;
+                        // Baut die eindeutige ID des WFS-Flurstücks
+                        const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
+                        
+                        // 🚀 CORE-FIX: Prüft live, ob diese Fläche bereits als GRÜNER Bestand geladen ist
+                        let bereitsImBestand = false;
+                        if (typeof geojsonLayer !== 'undefined' && geojsonLayer) {
+                            geojsonLayer.eachLayer(function(bl) {
+                                if (bl.feature && bl.feature.properties) {
+                                    const bp = bl.feature.properties;
+                                    const bId = bp.gemarkung + '-' + bp.flur + '-' + (bp.flurstueck || bp.flurstueck_zaehler);
+                                    if (bId.toLowerCase().trim() === flurstueckId.toLowerCase().trim()) {
+                                        bereitsImBestand = true;
+                                    }
+                                }
+                            });
+                        }
+
+                        // ❌ ÜBERLAGERUNGS-SCHUTZ: Wenn im Bestand, machen wir das blaue Overlay unsichtbar und blockieren Klicks!
+                        if (bereitsImBestand) {
+                            return {
+                                fillColor: '#000000',
+                                fillOpacity: 0,
+                                color: '#000000',
+                                weight: 0,
+                                opacity: 0,
+                                interactive: false // 🎯 Verhindert, dass Blau den Klick auf Grün abfängt!
+                            };
+                        }
+
+                        // Normaler Style für echtes, unberührtes Umland
+                        const schonImKorb = gewaehlteFeaturesSammelkorb.some(k => 
+                            k.properties.flurstueck === feature.properties.flurstueck && 
+                            parseInt(k.properties.flur) === parseInt(feature.properties.flur) &&
+                            k.properties.gemarkung.toLowerCase().trim() === feature.properties.gemarkung.toLowerCase().trim()
+                        );
+                        
+                        if (schonImKorb) {
+                            return { fillColor: '#2563eb', fillOpacity: 0.5, weight: 2.5, color: '#2563eb', dashArray: null };
+                        }
+
+                        return { fillColor: '#3b82f6', fillOpacity: 0.12, weight: 1.2, color: '#2563eb', dashArray: '3, 5' };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        // (Der restliche onEachFeature-Klickblock bleibt exakt so wie er ist!)
+
+                        layer.on('click', function(e) {
+
+                            L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e);
+                      
+                            // 🚀 WENN EIN VERTRAG AKTIV IST (Warenkorb-Modus):
+                            if (typeof vinicoreAktiveVertragId !== 'undefined' && vinicoreAktiveVertragId) {
+                                const idx = gewaehlteFeaturesSammelkorb.findIndex(f => 
+                                    f.properties.flurstueck === feature.properties.flurstueck &&
+                                    parseInt(f.properties.flur) === parseInt(feature.properties.flur) &&
+                                    f.properties.gemarkung.toLowerCase().trim() === feature.properties.gemarkung.toLowerCase().trim()
+                                );
+                                
+                                if (idx > -1) { 
+                                    gewaehlteFeaturesSammelkorb.splice(idx, 1); 
+                                    umgebungsWfsLayer.resetStyle(layer); 
+                                } else { 
+                                    gewaehlteFeaturesSammelkorb.push(feature); 
+                                    layer.setStyle({ fillColor: '#2563eb', fillOpacity: 0.5, weight: 2.5, color: '#2563eb', dashArray: null }); 
+                                }
+                                rendereSammlerInspektor();
+                                return;
                             }
-                        });
-                    }
 
-                    // ❌ SPERRE: Wenn die Fläche bereits im Bestand ist, machen wir das blaue WFS-Overlay unsichtbar!
-                    if (bereitsImBestand) {
-                        return {
-                            fillColor: '#000000',
-                            fillOpacity: 0,
-                            color: '#000000',
-                            weight: 0,
-                            opacity: 0,
-                            interactive: false // Macht die Fläche für Klicks komplett transparent!
-                        };
-                    }
-
-                    // 2. CHECK: Liegt die Fläche aktuell im gelben Warenkorb? [source: 1.1.2]
-                    const imKorb = vinicoreVertragsWarenkorb.some(item => {
-                        const p = item.properties;
-                        return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
-                    });
-
-                    // 🟡 Wenn im Korb, bleibt die Fläche dauerhaft GELB
-                    if (imKorb) {
-                        return {
-                            fillColor: '#eab308',
-                            fillOpacity: 0.5,
-                            color: '#ca8a04',
-                            weight: 2
-                        };
-                    }
-
-                    // 🔷 Standard-Style für echtes Umland: Transluzentes Hellblau
-                    return {
-                        fillColor: '#38bdf8',
-                        fillOpacity: 0.2,
-                        color: '#0284c7',
-                        weight: 1
-                    };
-                },
-
-
-            onEachFeature: function (feature, layer) {
-                layer.on('click', function (e) {
-                        // 1. ANSICHTS-MODUS (Kein Vertrag aktiv): Zeigt die reaktive Info-Box
-                        if (!vinicoreAktiveVertragId) {
+                            // 🔷 REINER ANSICHTSMODUS (Kein Vertrag aktiv): Zeigt die Daten kollisionsfrei!
                             if (umgebungsWfsLayer) {
-                                umgebungsWfsLayer.eachLayer(function(l) {
-                                    l.setStyle({ fillColor: '#38bdf8', fillOpacity: 0.2, color: '#0284c7', weight: 1 });
-                                });
+                                umgebungsWfsLayer.eachLayer(function(l) { umgebungsWfsLayer.resetStyle(l); });
                             }
                             layer.setStyle({ fillColor: '#06b6d4', fillOpacity: 0.6, color: '#0891b2', weight: 2 });
 
-                            // 🚀 Blendet die Sidebar physisch ein, falls sie versteckt war
-                            const sammlerBox = document.getElementById('sammlerInspektor');
-                            if (sammlerBox) { sammlerBox.classList.remove('hidden'); }
-
                             const props = feature.properties;
-                            const slot = document.getElementById('liveInspektorDetailSlot');
-                            if (slot) {
-                                // 🚀 Reißt die Versteck-Klasse von Tailwind direkt weg!
-                                slot.classList.remove('hidden');
-                                slot.style.display = 'block';
-                                
-                                slot.innerHTML = `
-                                    <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 font-sans text-xs animate-fadeIn">
+                            const body = document.getElementById('globalInspektorBody'); // Deine echte ID!
+                            if (body) {
+                                body.innerHTML = `
+                                    <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1.5 font-sans text-xs animate-fadeIn m-1">
                                         <h5 class="font-bold text-blue-900 uppercase text-[10px] tracking-wider">● Umland-Information</h5>
-                                        <span class="text-slate-600 font-mono block">Gemarkung: ${props.gemarkung || 'Umland'}</span>
+                                        <div class="font-bold text-slate-800 text-sm">${props.gemarkung || 'Umland'}</div>
                                         <span class="text-slate-500 font-mono block">Flur ${props.flur || '0'} | Nr. ${props.flurstueck || '0'}</span>
                                         <div class="text-red-700 font-medium text-[11px] mt-1 pt-1 border-t border-red-100">⚠️ Diese Fläche ist gesperrt. Kataster-Erfassungen sind aus Sicherheitsgründen streng vertragsgesteuert.</div>
                                     </div>`;
                             }
+                        });
 
-                            // 💥 CORE-FIX: Wir setzen die blockierende Variable temporär auf ein "Leer-Flag",
-                            // damit die weiter unten aufgerufene rendermethode den Text nicht sofort wieder löscht!
-                            window.vinicoreZuletztAktiveGruenUuid = null;
-                            
-                            // Ruft deine originale Sidebar-Methode auf, um den Korbzustand sauber zu halten
-                            if (typeof rendereSammlerInspektor === 'function') {
-                                rendereSammlerInspektor();
-                            }
-                            
-                            return;
-                        }
-
-
-
-
-        // 2. WARENKORB-MODUS (Vertrag aktiv)
-        const props = feature.properties;
-        const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
-        
-        const index = vinicoreVertragsWarenkorb.findIndex(item => {
-            const p = item.properties;
-            return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
-        });
-
-        if (index === -1) {
-            // 🟡 Hinzufügen zum Korb
-            vinicoreVertragsWarenkorb.push(feature);
-            layer.setStyle({ fillColor: '#eab308', fillOpacity: 0.5, color: '#ca8a04', weight: 2 });
-        } else {
-            // ↩️ Entfernen aus dem Korb
-            vinicoreVertragsWarenkorb.splice(index, 1);
-            layer.setStyle({ fillColor: '#38bdf8', fillOpacity: 0.2, color: '#0284c7', weight: 1 });
-        }
-
-        // 🚀 DER RICHTIGE TRIGER: Ruft deine optimierte Original-Funktion auf!
-        rendereSammlerInspektor();
-
-    });
 }
             }).addTo(map);
 
@@ -410,17 +386,21 @@
     }
 
     function rendereSammlerInspektor(aktiveUuid = null) {
-        const body = document.getElementById('globalInspektorBody'); 
-        if (!body) return;
+        const body = document.getElementById('globalInspektorBody'); if (!body) return;
+        const anzahlBlau = gewaehlteFeaturesSammelkorb.length;
 
-        if (typeof window.vinicoreZuletztAktiveGruenUuid === 'undefined') {
-            window.vinicoreZuletztAktiveGruenUuid = null;
+        // 🚀 CORE-FIX: Wenn kein Vertrag aktiv ist und der Korb leer ist, brechen wir das Neuzeichnen ab,
+        // damit der eben geöffnete Umland-Infotext im globalInspektorBody felsenfest stehen bleibt!
+        if (anzahlBlau === 0 && !aktiveUuid && (typeof vinicoreAktiveVertragId === 'undefined' || !vinicoreAktiveVertragId)) {
+            return;
         }
-        if (aktiveUuid !== null) {
-            window.vinicoreZuletztAktiveGruenUuid = aktiveUuid;
-        }
+
+        if (typeof window.vinicoreZuletztAktiveGruenUuid === 'undefined') { window.vinicoreZuletztAktiveGruenUuid = null; }
+        if (aktiveUuid !== null) { window.vinicoreZuletztAktiveGruenUuid = aktiveUuid; }
 
         let html = `<div class="space-y-2 font-sans text-xs flex flex-col h-full text-slate-700">`;
+        // ... (Der restliche Code der Funktion bleibt unberührt!)
+
         html += `<div id="liveInspektorDetailSlot" class="space-y-2"></div>`;
 
         // 🛒 INTEGRATION: Wenn eine vertrag_id aktiv ist, schaltet die Sidebar auf den neuen LocalStorage-Warenkorb!
@@ -616,71 +596,78 @@
     }
 
     function schliesseGemarkungModal() { document.getElementById('gemarkungAuswahlModal').classList.add('hidden'); }
-function oeffneGlobalenInspektorWidget(uuid) {
-    // 🚀 Öffnet die Sidebar-Hüllen unzerstörbar auf deinem Monitor
-    const box1 = document.getElementById('parzellenInspektor');
-    const box2 = document.getElementById('sammlerInspektor');
-    if (box1) { box1.classList.remove('hidden'); box1.style.display = 'flex'; }
-    if (box2) { box2.classList.remove('hidden'); box2.style.display = 'flex'; }
+    function oeffneGlobalenInspektorWidget(uuid) {
+        const body = document.getElementById('globalInspektorBody'); 
+        if (!body) return;
+        
+        body.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-slate-400 text-xs font-medium space-y-2 font-sans"><div class="text-xl animate-spin">📡</div><div class="animate-pulse">Synchronisiere Detail-Matrix...</div></div>`;
 
-    const slot = document.getElementById('liveInspektorDetailSlot'); 
-    if (!slot) return;
-    
-    // 🚀 Macht den Slot unzerbrechlich sichtbar, bevor die Daten geladen werden!
-    slot.classList.remove('hidden');
-    slot.style.display = 'block';
-    
-    slot.innerHTML = `<div class="text-center py-6 text-slate-400 animate-pulse text-xs">📡 Synchronisiere Matrix...</div>`;
+        // 🚀 HIGH-SECURITY FETCH: Schickt Token und Header mit, um Routing-Sperren zu brechen!
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
+        fetch(`/api/kataster/parzelle-details/${uuid}`, { 
+            method: 'GET',
+            headers: { 
+                'X-Requested-With': 'XMLHttpRequest', 
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': token
+            } 
+        })
+        .then(r => {
+            if (!r.ok) {
+                throw new Error("Server-Antwort war nicht OK: Status " + r.status);
+            }
+            return r.json();
+        })
+        .then(res => {
+            if (res.success) {
+                const p = res.parzelle; 
+                const vZahl = parseInt(p.version || p.v || 1);
+                const vBadge = (vZahl === 1) ? `<div class="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse text-center mt-1.5 shadow-3xs">⚠️ Erstprüfung im Katasterspiegel ausstehend</div>` : '';
+                
+                let buttonHtml = '';
+                if (vZahl === 1) {
+                    buttonHtml = `
+                        <div class="flex items-center gap-1 mt-1">
+                            <button onclick="oeffneBearbeitenModal('${p.parzelle_uuid}', '${p.besitz_status || 'eigentum'}', '${p.flurname_lage || ''}', '${vZahl}')" class="text-amber-700 hover:text-amber-900 font-bold px-2 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg shadow-3xs transition cursor-pointer text-[11px] animate-pulse">⚖️ Erstprüfung</button>
+                            <button onclick="vinicoreExpressVernichtung('${p.parzelle_uuid}')" class="text-red-600 hover:text-red-800 font-bold p-1 px-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg shadow-3xs transition cursor-pointer text-[11px]">🗑️</button>
+                        </div>`;
+                } else {
+                    buttonHtml = `
+                        <button onclick="oeffneBearbeitenModal('${p.parzelle_uuid}', '${p.besitz_status || 'eigentum'}', '${p.flurname_lage || ''}', '${vZahl}')" class="text-blue-600 hover:text-blue-800 font-bold px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg shadow-3xs transition cursor-pointer text-[11px] mt-1">📝 Bearbeiten</button>`;
+                }
 
-    fetch(`/api/kataster/parzelle-details/${uuid}`, { 
-        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } 
-    })
-    .then(r => r.json())
-    .then(res => {
-        if (res.success) {
-            const p = res.parzelle;
-            const m2Formatiert = Number(p.amtliche_flaeche_m2).toLocaleString('de-DE');
-            const euroFormatiert = Number(p.zugeordneter_wert).toFixed(2).replace('.', ',');
+                let statusPille = (p.besitz_status === 'eigentum') ? '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">● Eigentum</span>' : ((p.besitz_status === 'gepachtet') ? '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">● Gepachtet</span>' : '<span class="bg-slate-50 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">○ Verpachtet</span>');
+                let verknuepfungsHtml = p.anlage_name ? `<div class="space-y-1 font-sans"><span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-3xs">🌿 ${p.anlage_name}</span><span class="block text-[11px] text-slate-400 font-medium">🚜 Großschlag: ${p.schlag_name || 'Unbekannt'}</span></div>` : `<span class="text-slate-400 text-[10px] font-mono italic">Katasterfläche besitzt aktuell keine Bestockung</span>`;
 
-            let statusPille = p.besitz_status === 'eigentum' 
-                ? '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">● Eigentum</span>' 
-                : '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">● Gepachtet</span>';
-
-            let agroHtml = p.anlage_name 
-                ? `<div class="space-y-1"><span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 rounded text-[10px] font-bold uppercase">🌿 ${p.anlage_name}</span></div>` 
-                : `<span class="text-slate-400 italic text-[10px]">Katasterfläche besitzt aktuell keine Bestockung</span>`;
-
-            slot.innerHTML = `
-                <div class="space-y-3 font-sans text-xs text-slate-700 animate-fadeIn p-1">
-                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2 shadow-3xs">
-                        <div class="flex justify-between items-start border-b border-slate-150 pb-2">
-                            <div>
-                                <h5 class="text-slate-900 font-extrabold text-sm mb-0.5">${p.gemarkung}</h5>
-                                <span class="text-slate-400 font-mono text-[10px]">Flur ${p.flur} | Nr. ${p.flurstueck_zaehler}</span>
+                body.innerHTML = `
+                    <div class="space-y-2 font-sans text-xs text-slate-700 p-1.5 animate-fadeIn">
+                        <div class="bg-slate-50/70 border border-slate-200 p-2.5 rounded-xl space-y-2 shadow-3xs">
+                            <div class="flex justify-between items-start border-b border-slate-100 pb-1.5">
+                                <div>
+                                    <h5 class="text-slate-900 font-extrabold text-sm tracking-tight leading-none mb-1">${p.gemarkung}</h5>
+                                    <span class="text-slate-400 font-mono text-[10px] block">Flur ${p.flur} | Nr. ${p.flurstueck_zaehler}${p.flurstueck_nenner ? '/' + p.flurstueck_nenner : ''}</span>
+                                </div>
+                                <div class="flex flex-col items-end space-y-1">${statusPille}${buttonHtml}</div>
                             </div>
-                            <div>${statusPille}</div>
+                            <div class="text-slate-500 italic text-[11px]">Amtlicher Flurname: <strong class="text-slate-700 font-semibold not-italic text-xs">${p.flurname_lage || 'Keine Angabe'}</strong></div>
+                            <div class="font-mono font-bold text-slate-900 text-sm border-t border-slate-100 pt-2 flex justify-between items-center">
+                                <span class="font-sans text-slate-400 font-medium text-xs">📐 Fläche:</span>
+                                <span class="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-3xs text-slate-950 font-bold">${parseInt(p.amtliche_flaeche_m2 || 0).toLocaleString('de-DE')} m²</span>
+                            </div>
+                            ${vBadge}
                         </div>
-                        <div class="text-slate-500">Lage: <strong class="text-slate-700">${p.flurname_lage}</strong></div>
-                        <div class="flex justify-between border-t border-slate-150 pt-2 font-bold">
-                            <span>📐 Amtliche Fläche:</span><span>${m2Formatiert} m²</span>
-                        </div>
-                        <div class="flex justify-between border-t border-slate-150 pt-2 font-bold text-emerald-600 bg-emerald-50/40 p-1.5 rounded-lg border border-emerald-100">
-                            <span>💰 Kalkulierter Wert:</span><span>${euroFormatiert} €</span>
-                        </div>
-                    </div>
-                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1.5 shadow-3xs">
-                        <h6 class="font-mono font-bold uppercase text-[9px] text-slate-400 tracking-wider border-b border-slate-150 pb-1">🍇 Agronomische Rebanlage</h6>
-                        ${agroHtml}
-                    </div>
-                </div>`;
-        }
-    })
-    .catch(err => {
-        console.error(err);
-        slot.innerHTML = `<div class="text-red-500 font-medium p-2 text-center">Schnittstellen-Absturz im Datenholer.</div>`;
-    });
-}
+                        <div class="bg-slate-50/30 border border-slate-150 p-2.5 rounded-xl space-y-1.5 shadow-3xs"><h6 class="font-mono font-bold uppercase text-[9px] text-slate-400 tracking-wider border-b border-slate-150 pb-1 flex items-center gap-1">🍇 Agronomische Rebanlage</h6><div class="py-0.5">${verknuepfungsHtml}</div></div>
+                    </div>`;
+            }
+        })
+        .catch(err => { 
+            console.error("Detaillierter Fehler im Gruen-Tunnel:", err); 
+            body.innerHTML = `<div class="text-center py-12 text-red-500 font-sans text-xs">⚠️ Fehler beim Laden der Parzellendaten. Prüfe die Browser-Konsole (F12)!</div>`;
+        });
+    }
+
+
 
 function oeffneBearbeitenModal(uuid, status, flurname, version) {
     document.getElementById('editUuid').value = uuid;

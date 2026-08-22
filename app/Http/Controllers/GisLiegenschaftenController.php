@@ -411,6 +411,7 @@ class GisLiegenschaftenController extends Controller
                 $gemaschlNode = $f->xpath('.//gemaschl') ?: $f->xpath('.//gemarkungsschluessel') ?: [];
                 $gemaschlRaw  = (!empty($gemaschlNode) && isset($gemaschlNode[0])) ? trim(strip_tags((string)$gemaschlNode[0])) : '';
 
+                // 🚀 ORIGINAL-FILTER VON HEUTE MITTAG: Prüft, ob das Flurstück bereits im grünen Bestand existiert
                 $abfrage = DB::table('parzellen')
                     ->where('gemarkung', '=', $gemarkungText)
                     ->where('flur', $flurInteger)
@@ -425,9 +426,12 @@ class GisLiegenschaftenController extends Controller
                     });
                 }
 
+                // ❌ LÖSCH-ZÜNDER: Wenn die Fläche bei uns im Bestand ist, überspringen wir sie radikal!
+                // Sie wird erst gar nicht in das blaue Array ($features) geschrieben und blockiert im Browser nichts mehr!
                 if ($abfrage->exists()) {
                     continue; 
                 }
+
 
                 $posList = $f->xpath('.//posList');
                 if (empty($posList) || !isset($posList[0])) continue;
@@ -526,49 +530,44 @@ class GisLiegenschaftenController extends Controller
     }
 
     /**
-     * 📡 SATELITTEN-TUNNEL: Lädt die Detailmatrix einer Parzelle für das Modal.
-     * 🚀 HIGH-SECURITY-FIX: Fängt jeden potenziellen Null-Pointer ab!
+     * 📡 UNIVERSAL DETAIL-API FÜR DEN GLOBALEN INSPEKTOR
+     * 🛡️ REVISIONS-REINHEIT: Keine Abfrage auf nicht existierende Agrar-Tabellen!
      */
-    public function holeParzelleDetails($uuid): \Illuminate\Http\JsonResponse
+    public function holeParzelleDetails($uuid): JsonResponse
     {
         try {
+            // Holt das Flurstück starr und ohne Joins direkt aus der parzellen-Tabelle
             $parzelle = DB::table('parzellen')
-                ->where('parzellen.parzelle_uuid', $uuid)
-                ->whereNull('parzellen.gueltig_bis')
-                ->leftJoin('parzelle_vertrag', 'parzelle_vertrag.parzelle_uuid', '=', 'parzellen.parzelle_uuid')
-                ->select(
-                    'parzellen.*',
-                    DB::raw('COALESCE(parzelle_vertrag.zugeordneter_wert, 0.00) as zugeordneter_wert'),
-                    'parzelle_vertrag.vertragable_id as vertrag_id'
-                )
+                ->where('parzelle_uuid', $uuid)
+                ->whereNull('gueltig_bis')
                 ->first();
 
             if (!$parzelle) {
-                return response()->json(['success' => false, 'message' => 'Liegenschafts-Details nicht gefunden.'], 404);
+                return response()->json(['success' => false, 'message' => 'Liegenschaft im aktiven Bestand nicht lokalisiert.'], 404);
             }
 
-            // Sicherstellen, dass Zahlen als saubere Typen ankommen
+            // 🎯 REINHEITS-GEBOT: Gibt exakt die Spaltenwerte deines Git-Migrationsstands aus!
             return response()->json([
                 'success' => true,
                 'parzelle' => [
                     'id'                  => $parzelle->id,
                     'parzelle_uuid'       => $parzelle->parzelle_uuid,
-                    'version'             => intval($parzelle->version ?? 1),
-                    'freigabe_status'     => $parzelle->freigabe_status ?? 'aktiv',
-                    'gemarkung'           => $parzelle->gemarkung ?? 'Unbekannt',
-                    'flur'                => $parzelle->flur ?? '0',
-                    'flurstueck_zaehler'  => $parzelle->flurstueck_zaehler ?? '0',
-                    'flurstueck_nenner'   => $parzelle->flurstueck_nenner ?? null,
-                    'flurname_lage'       => $parzelle->flurname_lage ?? 'Keine Angabe',
-                    'amtliche_flaeche_m2' => floatval($parzelle->amtliche_flaeche_m2 ?? 0),
-                    'besitz_status'       => $parzelle->besitz_status ?? 'eigentum',
-                    'zugeordneter_wert'   => floatval($parzelle->zugeordneter_wert),
-                    'anlage_name'         => $parzelle->anlage_name ?? null,
-                    'schlag_name'         => $parzelle->schlag_name ?? null
+                    'version'             => $parzelle->version,
+                    'freigabe_status'     => $parzelle->freigabe_status,
+                    'gemarkung'           => $parzelle->gemarkung,
+                    'flur'                => $parzelle->flur,
+                    'flurstueck_zaehler'  => $parzelle->flurstueck_zaehler,
+                    'flurstueck_nenner'   => $parzelle->flurstueck_nenner,
+                    'flurname_lage'       => $parzelle->flurname_lage,
+                    'amtliche_flaeche_m2' => $parzelle->amtliche_flaeche_m2,
+                    'besitz_status'       => $parzelle->besitz_status,
+                    'anlage_name'         => null, // Wird in Phase 4 mit der echten 'anlagen'-Tabelle verknüpft
+                    'schlag_name'         => null  // Wird in Phase 4 mit der echten 'schlaege'-Tabelle verknüpft
                 ]
             ]);
+
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Absturz: ' . $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Kernel-Sperre: ' . $e->getMessage()], 500);
         }
     }
 
@@ -632,7 +631,7 @@ class GisLiegenschaftenController extends Controller
                 'flurstueck_zaehler'  => $alteParzelle->flurstueck_zaehler,
                 'flurstueck_nenner'   => $alteParzelle->flurstueck_nenner,
                 'flurname_lage'       => trim($request->input('flurname_lage') ?? $alteParzelle->flurname_lage),
-                
+                'amtliche_flaeche_m2' =>$alteParzelle->amtliche_flaeche_m2,
                 // Bei V1 greift die automatisierte Vorbelegung, ab V2 ist es starr fixiert!
                 'besitz_status'       => ($aktuelleVersion === 1) ? $request->input('besitz_status') : $alteParzelle->besitz_status,
                 
