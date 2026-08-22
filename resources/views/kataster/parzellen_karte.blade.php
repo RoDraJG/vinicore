@@ -255,12 +255,39 @@
                 },
                 onEachFeature: function (feature, layer) {
                     layer.on('click', function (e) {
-                        // 1. Wenn KEINE vertrag_id in der URL aktiv ist, verhält sich die Karte wie gewohnt (Info-Modus)
+                        // 1. Wenn KEINE vertrag_id in der URL aktiv ist, zeigen wir die Umland-Infos direkt als Plain-Text an!
                         if (!vinicoreAktiveVertragId) {
-                            oeffneGlobalenInspektorWidget(feature);
+                            // ↩️ ALLER-ERSTES: Setzt alle anderen eventuell noch leuchtenden Umlandflächen zurück auf Standard-Hellblau!
+                            if (umgebungsWfsLayer) {
+                                umgebungsWfsLayer.eachLayer(function(l) {
+                                    l.setStyle({
+                                        fillColor: '#38bdf8', // Zurück auf originales Hellblau
+                                        fillOpacity: 0.2,
+                                        color: '#0284c7',
+                                        weight: 1
+                                    });
+                                });
+                            }
+
+                            // 🎨 VISUELLER INSPLIZIERUNGS-MARKER: Färbt NUR das aktuell geklickte Flurstück kräftig ein
+                            layer.setStyle({
+                                fillColor: '#06b6d4', // Kräftiges Cyan/Blau für den aktiven Klick
+                                fillOpacity: 0.6,
+                                color: '#0891b2',
+                                weight: 2
+                            });
+
+                            const props = feature.properties;
+                            const body = document.getElementById('globalInspektorBody');
+                            if (body) {
+                                body.innerHTML = '<div class="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 font-sans text-xs">' +
+                                    '<h5 class="font-bold text-blue-900">' + props.gemarkung + '</h5>' +
+                                    '<span class="text-slate-500 font-mono">Flur ' + props.flur + ' | Nr. ' + props.flurstueck + '</span>' +
+                                    '<div class="text-slate-400 italic text-[10px] mt-1">⚠️ Fläche befindet sich nicht im Betriebsbestand. Rufe die Karte aus einem Vertrag heraus auf, um sie zu importieren!</div>' +
+                                '</div>';
+                            }
                             return;
                         }
-
                         // 2. WARENKORB-MODUS AKTIV:
                         const props = feature.properties;
                         const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
@@ -526,65 +553,34 @@
      * 📡 DER EDLE AJAX-DETAIL-TUNNEL FOR GREEN BESTANDSPARZELLEN
      * 🚀 MAX-SPACE-OPTIMIZED: Große Schrift, p-2.5-Kompaktheit und reaktive Button-Weiche!
      */
-    function oeffneGlobalenInspektorWidget(uuid) {
-        const slot = document.getElementById('liveInspektorDetailSlot'); if (!slot) return;
-        slot.innerHTML = `<div class="flex flex-col items-center justify-center py-12 text-slate-400 text-xs font-medium space-y-2 font-sans"><div class="text-xl animate-spin">📡</div><div class="animate-pulse">Synchronisiere Detail-Matrix...</div></div>`;
-
-        fetch(`/api/kataster/parzelle-details/${uuid}`, { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } })
-        .then(r => r.json()).then(res => {
-            if (res.success) {
-                const p = res.parzelle; const vZahl = parseInt(p.version || p.v || 1);
-                const vBadge = (vZahl === 1) ? `<div class="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse text-center mt-1.5 shadow-3xs">⚠️ Erstprüfung im Katasterspiegel ausstehend</div>` : '';
-                
-                // 🚀 DYNAMISCHE WEICHE: Berechnet Text, Farbe und den Express-Löschknopf anhand der Revisions-Stufe!
-                let buttonHtml = '';
-                if (vZahl === 1) {
-                    buttonHtml = `
-                        <div class="flex items-center gap-1 mt-1">
-                            <button onclick="oeffneBearbeitenModal('${p.parzelle_uuid}', '${p.besitz_status || 'eigentum'}', '${p.flurname_lage || ''}', '${vZahl}')" class="text-amber-700 hover:text-amber-900 font-bold px-2 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg shadow-3xs transition cursor-pointer text-[11px] animate-pulse">
-                                ⚖️ Erstprüfung
-                            </button>
-                            <button onclick="vinicoreExpressVernichtung('${p.parzelle_uuid}')" class="text-red-600 hover:text-red-800 font-bold p-1 px-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg shadow-3xs transition cursor-pointer text-[11px]" title="Fehlimport spurlos vernichten">
-                                🗑️
-                            </button>
-                        </div>`;
-                } else {
-                    buttonHtml = `
-                        <button onclick="oeffneBearbeitenModal('${p.parzelle_uuid}', '${p.besitz_status || 'eigentum'}', '${p.flurname_lage || ''}', '${vZahl}')" class="text-blue-600 hover:text-blue-800 font-bold px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg shadow-3xs transition cursor-pointer text-[11px] mt-1">
-                            📝 Bearbeiten
-                        </button>`;
-                }
-
-                let statusPille = (p.besitz_status === 'eigentum') ? '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">● Eigentum</span>' : ((p.besitz_status === 'gepachtet') ? '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">● Gepachtet</span>' : '<span class="bg-slate-50 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">○ Verpachtet</span>');
-                let verknuepfungsHtml = p.anlage_name ? `<div class="space-y-1 font-sans"><span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-3xs">🌿 ${p.anlage_name}</span><span class="block text-[11px] text-slate-400 font-medium">🚜 Großschlag: ${p.schlag_name || 'Unbekannt'}</span></div>` : `<span class="text-slate-400 text-[10px] font-mono italic">Katasterfläche besitzt aktuell keine Bestockung</span>`;
-
-                slot.innerHTML = `
-                    <div class="space-y-2 font-sans text-xs text-slate-700 border-t border-slate-150 pt-2 animate-fadeIn">
-                        <div class="bg-slate-50/70 border border-slate-200 p-2.5 rounded-xl space-y-2 shadow-3xs">
-                            <div class="flex justify-between items-start border-b border-slate-100 pb-1.5">
-                                <div>
-                                    <h5 class="text-slate-900 font-extrabold text-sm tracking-tight leading-none mb-1">${p.gemarkung}</h5>
-                                    <span class="text-slate-400 font-mono text-[10px] block">Flur ${p.flur} | Nr. ${p.flurstueck_zaehler}${p.flurstueck_nenner ? '/' + p.flurstueck_nenner : ''}</span>
-                                </div>
-                                <div class="flex flex-col items-end space-y-1">
-                                    ${statusPille}
-                                    ${buttonHtml}
-                                </div>
-                            </div>
-                            <div class="text-slate-500 italic text-[11px]">Amtlicher Flurname: <strong class="text-slate-700 font-semibold not-italic text-xs">${p.flurname_lage || 'Keine Angabe'}</strong></div>
-                            <div class="font-mono font-bold text-slate-900 text-sm border-t border-slate-100 pt-2 flex justify-between items-center">
-                                <span class="font-sans text-slate-400 font-medium text-xs">📐 Fläche:</span>
-                                <span class="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-3xs text-slate-950 font-bold">${parseInt(p.amtliche_flaeche_m2).toLocaleString('de-DE')} m²</span>
-                            </div>
-                            ${vBadge}
-                        </div>
-                        <div class="bg-slate-50/30 border border-slate-150 p-2.5 rounded-xl space-y-1.5 shadow-3xs"><h6 class="font-mono font-bold uppercase text-[9px] text-slate-400 tracking-wider border-b border-slate-150 pb-1 flex items-center gap-1">🍇 Agronomische Rebanlage</h6><div class="py-0.5">${verknuepfungsHtml}</div></div>
-                    </div>`;
-            }
-        }).catch(err => { console.error(err); });
-    }
-
     /**
+     * 📡 DER AJAX-DETAIL-TUNNEL FÜR DIE SEITENLEISTE
+     * 🚀 TEIL 1: Lädt die Katasterdaten und die Finanzwerte aus der n:m-Tabelle!
+     */
+    function oeffneGlobalenInspektorWidget(uuid) {
+        const slot = document.getElementById('liveInspektorDetailSlot'); 
+        if (!slot) return;
+        
+        slot.innerHTML = `<div class="text-center py-6 text-slate-400 animate-pulse text-xs">📡 Synchronisiere Matrix...</div>`;
+
+        fetch(`/api/kataster/parzelle-details/${uuid}`, { 
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } 
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                // Ruft Teil 2 auf, um das HTML ohne Überhang blitzschnell zu rendern!
+                baueInspektorHtmlStruktur(res.parzelle, slot);
+            }
+        })
+        .catch(err => console.error(err));
+    }
+    function baueInspektorHtmlStruktur(p, slot) {
+        const vZahl = parseInt(p.version || 1);const m2Formatiert = parseInt(p.amtliche_flaeche_m2 || 0).toLocaleString('de-DE');
+        // 📊 ALLOKATIONS-CHECK: Liest den Euro-Wert aus der n:m-Kopplung
+        const euroWert = p.zugeordneter_wert ? parseFloat(p.zugeordneter_wert).toFixed(2) : '0,00';let statusPille = '';if (p.besitz_status === 'eigentum') {statusPille = '● Eigentum';} else if (p.besitz_status === 'gepachtet') {statusPille = '● Gepachtet';} else {statusPille = '○ Undefiniert';}let buttonHtml = '';if (vZahl === 1) {buttonHtml = '⚖ Erstprüfung';} else {buttonHtml = '✓ Geprüft';}slot.innerHTML = '' +'' +'' + p.gemarkung + '' +'Flur ' + p.flur + ' | Nr. ' + p.flurstueck_zaehler + '' +'' + statusPille + '' +'' +'Lage: ' + (p.flurname_lage || 'Keine Angabe') + '' +'' +'📐 Amtliche Fläche:' + m2Formatiert + ' m²' +'' +'' +'💰 Kalkulierter Wert:' + euroWert + ' €' +'' +'' + buttonHtml + '' +'';}
+    
+        /**
      * 🗑️ VINICORE EXPRESS-VERNICHTUNG FOR VERSION 1
      * Schießt Klickfehler ohne historische Überreste sofort aus der MySQL-Datenbank!
      */

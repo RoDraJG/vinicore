@@ -558,133 +558,98 @@ class GisLiegenschaftenController extends Controller
         return view('kataster.parzellen_uebersicht', compact('aktive', 'geloeschte', 'verkaufte', 'suche', 'sortSpalte', 'sortRichtung'));
     }
 
-    /**
-     * 📝 HISTORISIERTE BEARBEITUNG (ZEITSCHLOSS-PRINZIP)
-     * 🚀 UNZERSTÖRBAR: Verarbeitet die Erstprüfung/Revision inkl. optionalem 4-Augen-Prinzip und vollem Catch-Block!
+     /**
+     * 📝 HISTORISIERTE ERSTPRÜFUNG & REVISION (PHASE 2)
+     * Verriegelt eine gelbe Parzelle (V1) und schaltet sie auf Sattes Grün (V2+)!
      */
-    public function aktualisiereParzelle(Request $request, $uuid = null): JsonResponse
+    public function aktualisiereParzelle(Request $request, $uuid): JsonResponse
     {
-        // Fallback, falls die UUID im POST-Body statt in der URL übertragen wird
-        $zielUuid = $uuid ?? $request->input('uuid');
-
         $request->validate([
-            'besitz_status'   => 'required|in:eigentum,gepachtet,verpachtet', 
-            'flurname_lage'   => 'nullable|string|max:255', 
+            'besitz_status'   => 'required|in:eigentum,gepachtet,verpachtet',
+            'flurname_lage'   => 'nullable|string|max:255',
             'aenderungsgrund' => 'nullable|string|max:255'
         ]);
 
         try {
-            DB::beginTransaction(); 
+            DB::beginTransaction();
             $jetzt = now();
-            
-            // Holt die aktuell gültige Version des Flurstücks
+
+            // 1. Holt den aktuellen Entwurf (Version 1)
             $alteParzelle = DB::table('parzellen')
-                ->where('parzelle_uuid', $zielUuid)
+                ->where('parzelle_uuid', $uuid)
                 ->whereNull('gueltig_bis')
                 ->first();
-                
+
             if (!$alteParzelle) {
-                return response()->json(['success' => false, 'message' => 'Flurstück im aktiven Register nicht gefunden.'], 404);
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Liegenschaft nicht gefunden.'], 404);
             }
 
-            $aktuelleVersion = intval($alteParzelle->version); 
-            $vektorenRaw = $alteParzelle->polygon_vektoren;
-            if (is_array($vektorenRaw) || is_object($vektorenRaw)) { 
-                $vektorenRaw = json_encode($vektorenRaw); 
-            }
+            $aktuelleVersion = intval($alteParzelle->version);
 
-            $rohesArray = (array)$alteParzelle; 
-            unset($rohesArray['id']); 
-            
-            // 🎯 AUDIT-TRAIL: Speichert den ausführenden Nutzer aus der Live-Session
-            $rohesArray['user_id'] = Auth::id(); 
-            
-            // 🚀 EINZUG DES OPTIONALEN VIER-AUGEN-PRINZIPS
-            $einstellungen = DB::table('betriebseinstellungen')
-                ->where('betrieb_id', Auth::user()->betrieb_id ?? null)
-                ->first();
-                
-            $vierAugenAktiv = $einstellungen ? (bool)$einstellungen->vier_augen_kataster : false;
-            
-            // Wenn der User ein Admin ist, wird das Vier-Augen-Prinzip für ihn ignoriert (Sofort-Freigabe)
-            $istAdmin = DB::table('role_user')
-                ->join('roles', 'roles.id', '=', 'role_user.role_id')
-                ->where('role_user.user_id', Auth::id())
-                ->where('roles.slug', 'admin')
-                ->exists();
+            // 2. Zeitschloss zünden: Alten Zustand für den Audit-Trail einfrieren
+            DB::table('parzellen')
+                ->where('id', $alteParzelle->id)
+                ->update(['gueltig_bis' => $jetzt, 'updated_at' => $jetzt]);
 
-            if ($vierAugenAktiv && !$istAdmin) {
-                // Warteschleife: Parzelle wird eingereicht, das alte Flurstück bleibt vorerst unberührt aktiv!
-                $rohesArray['freigabe_status']  = 'eingereicht';
-                $rohesArray['aenderungsgrund']  = 'Revision eingereicht (Wartet auf Vier-Augen-Freigabe): ' . trim($request->aenderungsgrund ?? '');
-                $rohesArray['version']          = $aktuelleVersion + 1;
-                $rohesArray['polygon_vektoren'] = $vektorenRaw;
-                $rohesArray['besitz_status']    = $request->besitz_status;
-                $rohesArray['flurname_lage']    = trim($request->flurname_lage ?? $alteParzelle->flurname_lage);
-                $rohesArray['gueltig_von']      = $jetzt; 
-                $rohesArray['gueltig_bis']      = null;
-                $rohesArray['created_at']       = $jetzt; 
-                $rohesArray['updated_at']       = $jetzt;
+            // 3. Neuen Zustand mit Version + 1 und Status 'aktiv' einstanzen
+            DB::table('parzellen')->insert([
+                'parzelle_uuid'       => $uuid,
+                'version'             => $aktuelleVersion + 1,
+                'freigabe_status'     => 'aktiv', // 🟢 Schaltet die Fläche auf Sattes Grün um!
+                'polygon_vektoren'    => $alteParzelle->polygon_vektoren,
+                'gemeinde'            => $alteParzelle->gemeinde,
+                'gemarkung'           => $alteParzelle->gemarkung,
+                'gemarkungsschuelser' => $alteParzelle->gemarkungsschuelser,
+                'flur'                => $alteParzelle->flur,
+                'flurstueck_zaehler'  => $alteParzelle->flurstueck_zaehler,
+                'flurstueck_nenner'   => $alteParzelle->flurstueck_nenner,
+                'flurname_lage'       => trim($request->flurname_lage ?? $alteParzelle->flurname_lage),
+                'amtliche_flaeche_m2' => $alteParzelle->amtliche_flaeche_m2,
+                'besitz_status'       => $request->besitz_status, // Zuweisung Eigentum/Pacht
+                'aenderungsgrund'     => trim($request->aenderungsgrund ?? 'Kataster-Erstprüfung versiegelt'),
+                'gueltig_von'         => $jetzt,
+                'gueltig_bis'         => null,
+                'user_id'             => Auth::id(),
+                'created_at'          => $alteParzelle->created_at,
+                'updated_at'          => $jetzt
+            ]);
 
-                $tatsaechlicheSpalten = Schema::getColumnListing('parzellen');
-                $neueDaten = array_intersect_key($rohesArray, array_flip($tatsaechlicheSpalten));
-                
-                DB::table('parzellen')->insert($neueDaten);
-                DB::commit();
+            // 4. Record Lock nach erfolgreicher Versiegelung direkt aufheben
+            DB::table('parzellen_locks')->where('parzelle_uuid', $uuid)->delete();
 
-                // 🔓 Eigene Sperre nach dem Einreichen direkt wieder freigeben
-                DB::table('parzellen_locks')->where('parzelle_uuid', $zielUuid)->where('user_id', Auth::id())->delete();
+            DB::commit();
+            return response()->json(['success' => true, 'message' => 'Erstprüfung erfolgreich rechtssicher versiegelt!']);
 
-                return response()->json(['success' => true, 'message' => 'Änderungen erfolgreich zur Freigabe eingereicht!']);
-            } else {
-                // Standard-Direktbuchung: Die alte Version wird archiviert, die neue wird sofort 'aktiv'
-                DB::table('parzellen')->where('id', $alteParzelle->id)->update(['gueltig_bis' => $jetzt, 'updated_at' => $jetzt]);
-                
-                $rohesArray['freigabe_status']  = 'aktiv'; 
-                $rohesArray['version']          = $aktuelleVersion + 1;
-                $rohesArray['polygon_vektoren'] = $vektorenRaw;
-                $rohesArray['besitz_status']    = $request->besitz_status;
-                $rohesArray['flurname_lage']    = trim($request->flurname_lage ?? $alteParzelle->flurname_lage);
-                $rohesArray['aenderungsgrund']  = ($aktuelleVersion === 1) ? 'Erstaufnahme und erstmalige rechtliche Erfassung des Besitzverhältnisses' : trim($request->aenderungsgrund ?? 'Eigenschaften angepasst');
-                $rohesArray['gueltig_von']      = $jetzt; 
-                $rohesArray['gueltig_bis']      = null;
-                $rohesArray['created_at']       = $jetzt; 
-                $rohesArray['updated_at']       = $jetzt;
-
-                $tatsaechlicheSpalten = Schema::getColumnListing('parzellen');
-                $neueDaten = array_intersect_key($rohesArray, array_flip($tatsaechlicheSpalten));
-                
-                DB::table('parzellen')->insert($neueDaten); 
-                DB::commit();
-
-                // 🔓 Eigene Sperre nach der Direktbuchung freigeben
-                DB::table('parzellen_locks')->where('parzelle_uuid', $zielUuid)->where('user_id', Auth::id())->delete();
-                
-                return response()->json(['success' => true, 'message' => 'Flurstücks-Matrix erfolgreich direkt historisiert!']);
-            }
-
-        } catch (\Exception $e) { 
-            // 🛡️ REVISIONS-SCHUTZ: Rollt bei jedem Fehler alle Datenbank-Aktionen bedingungslos zurück!
-            DB::rollBack(); 
-            return response()->json(['success' => false, 'message' => 'Kernel-Absturz bei Historisierung: ' . $e->getMessage()], 500); 
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => 'Absturz bei Erstprüfung: ' . $e->getMessage()], 500);
         }
     }
 
-
-        /**
-     * 🛰️ UNIVERSAL DETAIL-API FÜR DEN GLOBALEN INSPEKTOR
-     * Liefert die vollständige agronomische und behördliche Matrix einer Parzelle via UUID.
+    /**
+     * 📡 SIDEBAR DETAIL MATRIX TUNNEL
+     * 🚀 EXTENDED-FIX: Lädt die reaktiv berechneten Allokations-Finanzwerte direkt mit in den Inspektor!
      */
     public function holeParzelleDetails($uuid): JsonResponse
     {
         try {
             $parzelle = DB::table('parzellen')
-                ->leftJoin('parzelle_anlage', 'parzellen.parzelle_uuid', '=', 'parzelle_anlage.parzelle_uuid')
-                ->leftJoin('anlagen', 'parzelle_anlage.anlage_id', '=', 'anlagen.id')
-                ->leftJoin('schlaege', 'anlagen.schlag_id', '=', 'schlaege.id')
+                // Bindet die polymorphe Kupplungstabelle für den Finanzwert ein
+                ->leftJoin('parzelle_vertrag', function($join) {
+                    $join->on('parzellen.parzelle_uuid', '=', 'parzelle_vertrag.parzelle_uuid')
+                         ->where('parzelle_vertrag.vertragable_type', '=', \App\Models\VinicoreVertrag::class);
+                })
+                // Bindet den Vater-Vertrag für die Vertragsnummer ein
+                ->leftJoin('vinicore_vertraege', 'vinicore_vertraege.id', '=', 'parzelle_vertrag.vertragable_id')
                 ->where('parzellen.parzelle_uuid', $uuid)
                 ->whereNull('parzellen.gueltig_bis')
-                ->select('parzellen.*', 'anlagen.name as anlage_name', 'schlaege.name as schlag_name')
+                ->select(
+                    'parzellen.*', 
+                    'parzelle_vertrag.zugeordneter_wert as allokierter_zins',
+                    'vinicore_vertraege.vertrag_nummer as vertrags_referenz',
+                    'vinicore_vertraege.typ as vertrags_typ'
+                )
                 ->first();
 
             if (!$parzelle) {
@@ -693,9 +658,10 @@ class GisLiegenschaftenController extends Controller
 
             return response()->json(['success' => true, 'parzelle' => $parzelle]);
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Detail-Tunnel fehlgeschlagen: ' . $e->getMessage()], 500);
         }
     }
+
      /**
      * 🔒 RECORD LOCKING: Versiegelt eine Parzelle temporär für die Bearbeitung.
      * 🚀 TRANS-LOCK FIX: Tippfehler beim Datumsstempel-Namen vollständig behoben!

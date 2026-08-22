@@ -57,16 +57,15 @@ class User extends Authenticatable
     }
 
     /**
-     * 🍇 DYNAMISCHER BETRIEBS-GETTER: Holt das aktuell aktive Weingut des Winzers.
-     * 🚀 CORE-FIX: Verknüpft das User-Model unzerbrechlich mit deiner 'betriebsdaten'-Tabelle!
+     * 🏢 ERFP-BETRIEBSANBINDUNG: Holt die globalen Einstellungen des Weinbaubetriebs.
+     * 🚀 REVISIONS-FIX: Wirft die gelöschten Pivot-Tabellen raus und greift direkt auf 'betriebseinstellungen' zu!
      */
     public function getAktuellerBetriebAttribute()
     {
-        // Holt über die Pivot-Tabelle den ersten verknüpften Betrieb aus 'betriebsdaten'
-        return DB::table('betrieb_user')
-            ->where('user_id', $this->id)
-            ->join('betriebsdaten', 'betriebsdaten.id', '=', 'betrieb_user.betrieb_id')
-            ->select('betriebsdaten.*')
+        // Greift ohne Umwege direkt über die betrieb_id des Users auf die neuen Einstellungen zu
+        return DB::table('betriebseinstellungen')
+            ->where('betrieb_id', $this->betrieb_id)
             ->first();
     }
+
 }
