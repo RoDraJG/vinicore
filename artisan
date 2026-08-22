@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+define('LARAVEL_START', microtime(true));
+
+// Prüft, ob sich das System im Wartungsmodus befindet...
+if (file_exists($maintenance = __DIR__.'/storage/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+// Registriert den automatischen Composer-Klassenlader...
+require __DIR__.'/vendor/autoload.php';
+
+// Startet Laravel und verarbeitet die eingehende Konsolen-Anfrage...
+$app = require_once __DIR__.'/bootstrap/app.php';
+$kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+
+$status = $kernel->handle(
+    $input = new Symfony\Component\Console\Input\ArgvInput,
+    new Symfony\Component\Console\Output\ConsoleOutput
+);
+
+$kernel->terminate($input, $status);
+
+exit($status);
