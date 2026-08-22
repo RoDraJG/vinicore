@@ -82,6 +82,13 @@ Route::middleware(['auth'])->group(function () {
     // ⚖️ Admin-Mündung für das Vier-Augen-Prinzip: Gibt eine eingereichte Revision final frei
     Route::post('/api/kataster/parzellen/freigeben/{uuid}', [GisLiegenschaftenController::class, 'freigebeParzelleAudit']);
 
+        // 🏢 NEU: Das kaufmännische Vertragswesen (Die Quelle für deine Katasterparzellen)
+    Route::get('/finanzen/vertrag-anlegen', [\App\Http\Controllers\VertragController::class, 'erstelleView'])->name('vertrag.anlegen');
+    Route::post('/finanzen/vertrag-speichern', [\App\Http\Controllers\VertragController::class, 'speichereVertrag'])->name('vertrag.speichern');
+    Route::post('/api/kataster/vertrag/final-versiegeln', [\App\Http\Controllers\VertragController::class, 'finaleVersiegeln']);
+
+
+
 });
 
 // BREEZE INTEGRATION: Lädt die namensgesicherte auth.php unzerbrechlich hinzu!

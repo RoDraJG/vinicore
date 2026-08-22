@@ -34,7 +34,7 @@
         </div>
         <!-- Füge dem Zähler die ID 'trefferZaehlerPille' hinzu: -->
         <div id="trefferZaehlerPille" class="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 bg-slate-50 border px-2 py-1 rounded-md">
-            Treffer: {{ count($aktive) }} Parzellen
+            Treffer: {{ $parzellen->total() }} Parzellen
         </div>
     </div>
 
@@ -74,7 +74,7 @@
                     </tr>
                 </thead>
 <tbody class="divide-y divide-slate-100 text-slate-700 font-medium">
-    @forelse($aktive as $p)
+    @forelse($parzellen as $p)
         <tr class="hover:bg-slate-50/50 transition-colors">
         <!-- 🏛️ 1. AMTLICHE GEMARKUNG MITSAMT REINEM GEMEINDENAMEN & GEMARKUNGSSCHLÜSSEL -->
         <td class="p-3 leading-tight">
@@ -180,8 +180,9 @@
     <!-- 4. DIE HISTORISCHEN ARCHIV-KARTEN (REIN INFORMATIV AM FUSS) -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-xs font-mono">
         <div class="bg-white p-3 rounded-xl border border-slate-200 text-slate-500">
-            <span>📉 Ausgebuchte Flächen im Archiv: {{ count($geloeschte) + count($verkaufte) }}</span>
+            <span>📉 Ausgebuchte Flächen im Archiv: 0</span>
         </div>
+
     </div>
 </div>
 

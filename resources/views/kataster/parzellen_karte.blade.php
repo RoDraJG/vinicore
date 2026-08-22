@@ -246,78 +246,129 @@
 
             umgebungsWfsLayer = L.geoJSON(data, {
                 style: function(feature) {
+                    const props = feature.properties;
+                    const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
+                    
+                    // 1. CHECK: Existiert diese Fläche bereits in unseren GRÜNEN Beständen (in der Datenbank)?
+                    let bereitsImBestand = false;
+                    if (typeof geojsonLayer !== 'undefined' && geojsonLayer) {
+                        geojsonLayer.eachLayer(function(bl) {
+                            const bp = bl.feature.properties;
+                            const bId = bp.gemarkung + '-' + bp.flur + '-' + (bp.flurstueck || bp.flurstueck_zaehler);
+                            if (bId === flurstueckId) {
+                                bereitsImBestand = true;
+                            }
+                        });
+                    }
+
+                    // ❌ SPERRE: Wenn die Fläche bereits im Bestand ist, machen wir das blaue WFS-Overlay unsichtbar!
+                    if (bereitsImBestand) {
+                        return {
+                            fillColor: '#000000',
+                            fillOpacity: 0,
+                            color: '#000000',
+                            weight: 0,
+                            opacity: 0,
+                            interactive: false // Macht die Fläche für Klicks komplett transparent!
+                        };
+                    }
+
+                    // 2. CHECK: Liegt die Fläche aktuell im gelben Warenkorb? [source: 1.1.2]
+                    const imKorb = vinicoreVertragsWarenkorb.some(item => {
+                        const p = item.properties;
+                        return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
+                    });
+
+                    // 🟡 Wenn im Korb, bleibt die Fläche dauerhaft GELB
+                    if (imKorb) {
+                        return {
+                            fillColor: '#eab308',
+                            fillOpacity: 0.5,
+                            color: '#ca8a04',
+                            weight: 2
+                        };
+                    }
+
+                    // 🔷 Standard-Style für echtes Umland: Transluzentes Hellblau
                     return {
-                        fillColor: '#38bdf8', // Transluzentes Hellblau (Standard)
+                        fillColor: '#38bdf8',
                         fillOpacity: 0.2,
                         color: '#0284c7',
                         weight: 1
                     };
                 },
-                onEachFeature: function (feature, layer) {
-                    layer.on('click', function (e) {
-                        // 1. Wenn KEINE vertrag_id in der URL aktiv ist, zeigen wir die Umland-Infos direkt als Plain-Text an!
+
+
+            onEachFeature: function (feature, layer) {
+                layer.on('click', function (e) {
+                        // 1. ANSICHTS-MODUS (Kein Vertrag aktiv): Zeigt die reaktive Info-Box
                         if (!vinicoreAktiveVertragId) {
-                            // ↩️ ALLER-ERSTES: Setzt alle anderen eventuell noch leuchtenden Umlandflächen zurück auf Standard-Hellblau!
                             if (umgebungsWfsLayer) {
                                 umgebungsWfsLayer.eachLayer(function(l) {
-                                    l.setStyle({
-                                        fillColor: '#38bdf8', // Zurück auf originales Hellblau
-                                        fillOpacity: 0.2,
-                                        color: '#0284c7',
-                                        weight: 1
-                                    });
+                                    l.setStyle({ fillColor: '#38bdf8', fillOpacity: 0.2, color: '#0284c7', weight: 1 });
                                 });
                             }
+                            layer.setStyle({ fillColor: '#06b6d4', fillOpacity: 0.6, color: '#0891b2', weight: 2 });
 
-                            // 🎨 VISUELLER INSPLIZIERUNGS-MARKER: Färbt NUR das aktuell geklickte Flurstück kräftig ein
-                            layer.setStyle({
-                                fillColor: '#06b6d4', // Kräftiges Cyan/Blau für den aktiven Klick
-                                fillOpacity: 0.6,
-                                color: '#0891b2',
-                                weight: 2
-                            });
+                            // 🚀 Blendet die Sidebar physisch ein, falls sie versteckt war
+                            const sammlerBox = document.getElementById('sammlerInspektor');
+                            if (sammlerBox) { sammlerBox.classList.remove('hidden'); }
 
                             const props = feature.properties;
-                            const body = document.getElementById('globalInspektorBody');
-                            if (body) {
-                                body.innerHTML = '<div class="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 font-sans text-xs">' +
-                                    '<h5 class="font-bold text-blue-900">' + props.gemarkung + '</h5>' +
-                                    '<span class="text-slate-500 font-mono">Flur ' + props.flur + ' | Nr. ' + props.flurstueck + '</span>' +
-                                    '<div class="text-slate-400 italic text-[10px] mt-1">⚠️ Fläche befindet sich nicht im Betriebsbestand. Rufe die Karte aus einem Vertrag heraus auf, um sie zu importieren!</div>' +
-                                '</div>';
+                            const slot = document.getElementById('liveInspektorDetailSlot');
+                            if (slot) {
+                                // 🚀 Reißt die Versteck-Klasse von Tailwind direkt weg!
+                                slot.classList.remove('hidden');
+                                slot.style.display = 'block';
+                                
+                                slot.innerHTML = `
+                                    <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1 font-sans text-xs animate-fadeIn">
+                                        <h5 class="font-bold text-blue-900 uppercase text-[10px] tracking-wider">● Umland-Information</h5>
+                                        <span class="text-slate-600 font-mono block">Gemarkung: ${props.gemarkung || 'Umland'}</span>
+                                        <span class="text-slate-500 font-mono block">Flur ${props.flur || '0'} | Nr. ${props.flurstueck || '0'}</span>
+                                        <div class="text-red-700 font-medium text-[11px] mt-1 pt-1 border-t border-red-100">⚠️ Diese Fläche ist gesperrt. Kataster-Erfassungen sind aus Sicherheitsgründen streng vertragsgesteuert.</div>
+                                    </div>`;
                             }
+
+                            // 💥 CORE-FIX: Wir setzen die blockierende Variable temporär auf ein "Leer-Flag",
+                            // damit die weiter unten aufgerufene rendermethode den Text nicht sofort wieder löscht!
+                            window.vinicoreZuletztAktiveGruenUuid = null;
+                            
+                            // Ruft deine originale Sidebar-Methode auf, um den Korbzustand sauber zu halten
+                            if (typeof rendereSammlerInspektor === 'function') {
+                                rendereSammlerInspektor();
+                            }
+                            
                             return;
                         }
-                        // 2. WARENKORB-MODUS AKTIV:
-                        const props = feature.properties;
-                        const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
-                        
-                        const index = vinicoreVertragsWarenkorb.findIndex(item => {
-                            const p = item.properties;
-                            return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
-                        });
 
-                        if (index === -1) {
-                            // 🟡 Fläche war blau, wird in den Korb gelegt und leuchtet Gelb auf!
-                            vinicoreVertragsWarenkorb.push(feature);
-                            layer.setStyle({
-                                fillColor: '#eab308', // Signal-Gelb
-                                fillOpacity: 0.5,
-                                color: '#ca8a04',
-                                weight: 2
-                            });
-                        } else {
-                            // ↩️ Fläche war gelb, fliegt aus dem Korb und wird wieder Hellblau!
-                            vinicoreVertragsWarenkorb.splice(index, 1);
-                            layer.setStyle({
-                                fillColor: '#38bdf8', // Zurück auf Hellblau
-                                fillOpacity: 0.2,
-                                color: '#0284c7',
-                                weight: 1
-                            });
-                        }
-                    });
-                }
+
+
+
+        // 2. WARENKORB-MODUS (Vertrag aktiv)
+        const props = feature.properties;
+        const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
+        
+        const index = vinicoreVertragsWarenkorb.findIndex(item => {
+            const p = item.properties;
+            return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
+        });
+
+        if (index === -1) {
+            // 🟡 Hinzufügen zum Korb
+            vinicoreVertragsWarenkorb.push(feature);
+            layer.setStyle({ fillColor: '#eab308', fillOpacity: 0.5, color: '#ca8a04', weight: 2 });
+        } else {
+            // ↩️ Entfernen aus dem Korb
+            vinicoreVertragsWarenkorb.splice(index, 1);
+            layer.setStyle({ fillColor: '#38bdf8', fillOpacity: 0.2, color: '#0284c7', weight: 1 });
+        }
+
+        // 🚀 DER RICHTIGE TRIGER: Ruft deine optimierte Original-Funktion auf!
+        rendereSammlerInspektor();
+
+    });
+}
             }).addTo(map);
 
 
@@ -359,10 +410,9 @@
     }
 
     function rendereSammlerInspektor(aktiveUuid = null) {
-        const body = document.getElementById('globalInspektorBody'); if (!body) return;
-        const anzahlBlau = gewaehlteFeaturesSammelkorb.length;
+        const body = document.getElementById('globalInspektorBody'); 
+        if (!body) return;
 
-        // 🛡️ REVISIONS-SCHILD: Überschreibt das Gedächtnis NUR, wenn explizit eine neue Uuid übergeben wurde!
         if (typeof window.vinicoreZuletztAktiveGruenUuid === 'undefined') {
             window.vinicoreZuletztAktiveGruenUuid = null;
         }
@@ -373,39 +423,56 @@
         let html = `<div class="space-y-2 font-sans text-xs flex flex-col h-full text-slate-700">`;
         html += `<div id="liveInspektorDetailSlot" class="space-y-2"></div>`;
 
+        // 🛒 INTEGRATION: Wenn eine vertrag_id aktiv ist, schaltet die Sidebar auf den neuen LocalStorage-Warenkorb!
+        if (vinicoreAktiveVertragId) {
+            if (vinicoreVertragsWarenkorb.length > 0) {
+                let listHtml = '';
+                vinicoreVertragsWarenkorb.forEach((f, idx) => {
+                    const props = f.properties;
+                    listHtml += `<div class="bg-amber-50/40 border border-amber-200 p-2 rounded-xl text-[11px] flex justify-between items-center shadow-3xs">
+                        <div>
+                            <strong>${props.gemarkung || 'Umland'}</strong><br>
+                            <span class="text-slate-500 font-mono text-[9px]">Flur ${props.flur || '1'} | Nr. ${props.flurstueck || '0'}</span>
+                        </div>
+                        <button onclick="entferneAusKorbDirekt(${idx})" class="text-red-500 hover:text-red-700 font-bold px-2 text-base cursor-pointer">×</button>
+                    </div>`;
+                });
 
-        // 🛒 BLAUER WARENKORB: Reiht sich flexibel und permanent sichtbar darunter ein
-        if (anzahlBlau > 0) {
-            let summeBlauM2 = 0; let blauListHtml = '';
-            gewaehlteFeaturesSammelkorb.forEach((f, idx) => {
-                const props = f.properties; const onyxM2 = parseInt(props.flaeche_m2 || 0); summeBlauM2 += onyxM2;
-                blauListHtml += `<div class="bg-blue-50/30 border border-blue-200 p-2 rounded-xl text-[11px] flex justify-between items-center shadow-3xs"><div><strong>${props.gemarkung}</strong><br><span class="text-slate-500 font-mono text-[9px]">Flur ${props.flur || '1'} | Nr. ${props.flurstueck}</span><br><div class="text-blue-700 font-mono font-bold text-[10px] mt-0.5 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100/60 inline-block">${onyxM2.toLocaleString('de-DE')} m²</div></div><button onclick="EntferneEinzelneAuswahl('blau', ${idx})" class="text-red-500 hover:text-red-700 font-bold px-2 text-base cursor-pointer">×</button></div>`;
-            });
+                html += `
+                    <div class="bg-amber-50/10 border border-amber-100 p-2 rounded-xl flex flex-col h-auto shadow-3xs">
+                        <div class="flex justify-between items-center border-b border-amber-100 pb-1 mb-1.5">
+                            <h5 class="font-bold text-amber-600 font-mono tracking-wider text-[10px] uppercase flex items-center gap-1 select-none">
+                                <span>🛒 Gewählte Parzellen (${vinicoreVertragsWarenkorb.length})</span>
+                            </h5>
+                            <button onclick="vinicoreVertragsWarenkorb=[];if(umgebungsWfsLayer)umgebungsWfsLayer.resetStyle();rendereSammlerInspektor();" class="text-[9px] font-mono font-bold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 px-1.5 py-0.5 rounded transition cursor-pointer">🗑️ Leeren</button>
+                        </div>
+                        <div class="space-y-1 overflow-y-auto pr-0.5 mb-1.5 max-h-40 md:max-h-[35vh]">${listHtml}</div>
+                    </div>`;
+            } else if (!window.vinicoreZuletztAktiveGruenUuid && !window.vinicoreZuletztGeklicktesUmland) {
+                // Zeigt den Platzhalter NUR an, wenn weder eine grüne Parzelle NOCH eine blaue Umlandfläche aktiv angewählt ist!
+                html += `<div class="text-center py-12 text-slate-400 text-xs font-medium"><div class="text-2xl mb-1 text-slate-300">🛰️</div>Klicke auf blaue Umlandflächen, um sie in den Vertrag zu legen.</div>`;
+            }
 
-            if (typeof inspektorBlauGeoeffnet === 'undefined') window.inspektorBlauGeoeffnet = true;
-            const pfeilB = window.inspektorBlauGeoeffnet ? '▲' : '▼'; const verstecktB = window.inspektorBlauGeoeffnet ? '' : 'hidden';
-
-            html += `
-                <div class="bg-blue-50/10 border border-blue-100 p-2 rounded-xl flex flex-col h-auto shadow-3xs">
-                    <div class="flex justify-between items-center border-b border-blue-100 pb-1 mb-1.5">
-                        <h5 onclick="window.inspektorBlauGeoeffnet=!window.inspektorBlauGeoeffnet;rendereSammlerInspektor();" class="font-bold text-blue-600 font-mono tracking-wider text-[10px] uppercase flex items-center gap-1 cursor-pointer select-none">
-                            <span>🛒 Neue Auswahl (${anzahlBlau})</span>
-                            <span class="text-[9px] bg-blue-100/80 px-1.5 py-0.5 rounded text-blue-700 font-mono">${pfeilB}</span>
-                        </h5>
-                        <button onclick="gewaehlteFeaturesSammelkorb=[];if(umgebungsWfsLayer)umgebungsWfsLayer.resetStyle();rendereSammlerInspektor();" class="text-[9px] font-mono font-bold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 px-1.5 py-0.5 rounded transition cursor-pointer">🗑️ Leeren</button>
-                    </div>
-                    <div class="${verstecktB} space-y-1 overflow-y-auto pr-0.5 mb-1.5 h-auto max-h-40 md:max-h-[35vh]">${blauListHtml}</div>
-                    <div class="text-right text-[11px] font-mono font-bold text-blue-600 bg-blue-50/60 px-2 py-0.5 rounded border border-blue-200/50">Σ Neufl.: ${summeBlauM2.toLocaleString('de-DE')} m²</div>
-                </div>
-                <button onclick="ZündeSammelSpeicherung()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-mono font-bold text-[11px] py-2 px-3 rounded-xl shadow-md transition uppercase tracking-wider cursor-pointer">📥 Auswahl importieren</button>`;
-        } else if (!window.vinicoreZuletztAktiveGruenUuid) {
-            html += `<div class="text-center py-12 text-slate-400 text-xs font-medium"><div class="text-2xl mb-1 text-slate-300">🛰️</div>Hellblaue Flächen anklicken, um den Importkorb zu füllen.</div>`;
+        } else {
+            // 🔹 ALTER ORIGINALER MODUS (Ohne Vertrag): Nutzt wie gewohnt das blaue Array
+            const anzahlBlau = gewaehlteFeaturesSammelkorb.length;
+            if (anzahlBlau > 0) {
+                let summeBlauM2 = 0; let blauListHtml = '';
+                gewaehlteFeaturesSammelkorb.forEach((f, idx) => {
+                    const props = f.properties; const onyxM2 = parseInt(props.flaeche_m2 || 0); summeBlauM2 += onyxM2;
+                    blauListHtml += `<div class="bg-blue-50/30 border border-blue-200 p-2 rounded-xl text-[11px] flex justify-between items-center shadow-3xs"><div><strong>${props.gemarkung}</strong><br><span class="text-slate-500 font-mono text-[9px]">Flur ${props.flur || '1'} | Nr. ${props.flurstueck}</span><br><div class="text-blue-700 font-mono font-bold text-[10px] mt-0.5 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100/60 inline-block">${onyxM2.toLocaleString('de-DE')} m²</div></div><button onclick="EntferneEinzelneAuswahl('blau', ${idx})" class="text-red-500 hover:text-red-700 font-bold px-2 text-base cursor-pointer">×</button></div>`;
+                });
+                if (typeof inspektorBlauGeoeffnet === 'undefined') window.inspektorBlauGeoeffnet = true;
+                const pfeilB = window.inspektorBlauGeoeffnet ? '▲' : '▼'; const verstecktB = window.inspektorBlauGeoeffnet ? '' : 'hidden';
+                html += `<div class="bg-blue-50/10 border border-blue-100 p-2 rounded-xl flex flex-col h-auto shadow-3xs"><div class="flex justify-between items-center border-b border-blue-100 pb-1 mb-1.5"><h5 onclick="window.inspektorBlauGeoeffnet=!window.inspektorBlauGeoeffnet;rendereSammlerInspektor();" class="font-bold text-blue-600 font-mono tracking-wider text-[10px] uppercase flex items-center gap-1 cursor-pointer select-none"><span>🛒 Neue Auswahl (${anzahlBlau})</span> <span class="text-[9px] bg-blue-100/80 px-1.5 py-0.5 rounded text-blue-700 font-mono">${pfeilB}</span></h5><button onclick="gewaehlteFeaturesSammelkorb=[];if(umgebungsWfsLayer)umgebungsWfsLayer.resetStyle();rendereSammlerInspektor();" class="text-[9px] font-mono font-bold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 px-1.5 py-0.5 rounded transition cursor-pointer">🗑️ Leeren</button></div><div class="${verstecktB} space-y-1 overflow-y-auto pr-0.5 mb-1.5 h-auto max-h-40 md:max-h-[35vh]">${blauListHtml}</div><div class="text-right text-[11px] font-mono font-bold text-blue-600 bg-blue-50/60 px-2 py-0.5 rounded border border-blue-200/50">Σ Neufl.: ${summeBlauM2.toLocaleString('de-DE')} m²</div></div><button onclick="ZündeSammelSpeicherung()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-mono font-bold text-[11px] py-2 px-3 rounded-xl shadow-md transition uppercase tracking-wider cursor-pointer">📥 Auswahl importieren</button>`;
+            } else if (!window.vinicoreZuletztAktiveGruenUuid) {
+                html += `<div class="text-center py-12 text-slate-400 text-xs font-medium"><div class="text-2xl mb-1 text-slate-300">🛰️</div>Hellblaue Flächen anklicken, um den Importkorb zu füllen.</div>`;
+            }
         }
 
         html += `</div>`;
         body.innerHTML = html;
 
-        // 🚀 LIVE-RELOAD: Wenn eine grüne Parzelle aktiv war, rendern wir sie ohne Überlagerung direkt mit!
         if (window.vinicoreZuletztAktiveGruenUuid) { 
             oeffneGlobalenInspektorWidget(window.vinicoreZuletztAktiveGruenUuid); 
         }
@@ -549,161 +616,122 @@
     }
 
     function schliesseGemarkungModal() { document.getElementById('gemarkungAuswahlModal').classList.add('hidden'); }
-    /**
-     * 📡 DER EDLE AJAX-DETAIL-TUNNEL FOR GREEN BESTANDSPARZELLEN
-     * 🚀 MAX-SPACE-OPTIMIZED: Große Schrift, p-2.5-Kompaktheit und reaktive Button-Weiche!
-     */
-    /**
-     * 📡 DER AJAX-DETAIL-TUNNEL FÜR DIE SEITENLEISTE
-     * 🚀 TEIL 1: Lädt die Katasterdaten und die Finanzwerte aus der n:m-Tabelle!
-     */
-    function oeffneGlobalenInspektorWidget(uuid) {
-        const slot = document.getElementById('liveInspektorDetailSlot'); 
-        if (!slot) return;
-        
-        slot.innerHTML = `<div class="text-center py-6 text-slate-400 animate-pulse text-xs">📡 Synchronisiere Matrix...</div>`;
+function oeffneGlobalenInspektorWidget(uuid) {
+    // 🚀 Öffnet die Sidebar-Hüllen unzerstörbar auf deinem Monitor
+    const box1 = document.getElementById('parzellenInspektor');
+    const box2 = document.getElementById('sammlerInspektor');
+    if (box1) { box1.classList.remove('hidden'); box1.style.display = 'flex'; }
+    if (box2) { box2.classList.remove('hidden'); box2.style.display = 'flex'; }
 
-        fetch(`/api/kataster/parzelle-details/${uuid}`, { 
-            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } 
-        })
-        .then(r => r.json())
-        .then(res => {
-            if (res.success) {
-                // Ruft Teil 2 auf, um das HTML ohne Überhang blitzschnell zu rendern!
-                baueInspektorHtmlStruktur(res.parzelle, slot);
-            }
-        })
-        .catch(err => console.error(err));
-    }
-    function baueInspektorHtmlStruktur(p, slot) {
-        const vZahl = parseInt(p.version || 1);const m2Formatiert = parseInt(p.amtliche_flaeche_m2 || 0).toLocaleString('de-DE');
-        // 📊 ALLOKATIONS-CHECK: Liest den Euro-Wert aus der n:m-Kopplung
-        const euroWert = p.zugeordneter_wert ? parseFloat(p.zugeordneter_wert).toFixed(2) : '0,00';let statusPille = '';if (p.besitz_status === 'eigentum') {statusPille = '● Eigentum';} else if (p.besitz_status === 'gepachtet') {statusPille = '● Gepachtet';} else {statusPille = '○ Undefiniert';}let buttonHtml = '';if (vZahl === 1) {buttonHtml = '⚖ Erstprüfung';} else {buttonHtml = '✓ Geprüft';}slot.innerHTML = '' +'' +'' + p.gemarkung + '' +'Flur ' + p.flur + ' | Nr. ' + p.flurstueck_zaehler + '' +'' + statusPille + '' +'' +'Lage: ' + (p.flurname_lage || 'Keine Angabe') + '' +'' +'📐 Amtliche Fläche:' + m2Formatiert + ' m²' +'' +'' +'💰 Kalkulierter Wert:' + euroWert + ' €' +'' +'' + buttonHtml + '' +'';}
+    const slot = document.getElementById('liveInspektorDetailSlot'); 
+    if (!slot) return;
     
-        /**
-     * 🗑️ VINICORE EXPRESS-VERNICHTUNG FOR VERSION 1
-     * Schießt Klickfehler ohne historische Überreste sofort aus der MySQL-Datenbank!
-     */
-    async function vinicoreExpressVernichtung(uuid) {
-        if (!confirm("⚠️ Möchtest du diesen Fehlimport wirklich spurlos und ohne Historie aus deiner ERP-Datenbank löschen?")) return;
-        
-        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-        try {
-            const r = await fetch(`/api/kataster/parzellen/ausbuchen/${uuid}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': token },
-                body: JSON.stringify({ aenderungsgrund: 'Fehlimport gelöscht' })
-            });
-            
-            if (r.ok) {
-                zeigeVinicoreToast('success', 'Parzelle restlos und spurlos eliminiert!');
-                window.vinicoreZuletztAktiveGruenUuid = null; 
-                
-                await ladeGeoJsonKataster(true);
-                rendereSammlerInspektor();
-                
-                if (umgebungsWfsLayer) umgebungsWfsLayer.clearLayers();
-                await ladeUmliegendeWfsParzellen();
-            } else {
-                zeigeVinicoreToast('error', 'Lösch-Sperre im Datenbank-Kernel.');
-            }
-        } catch (err) { console.error(err); }
-    }
-    /**
-     * 🔒 AMTLICHES BEARBEITEN-MODAL ÖFFNEN MITSAMT API RECORD-LOCKING
-     * 🚀 ORDENTLICHE REINHEIT: Keine Fallbacks oder Behelfe, steuert exakt deine HTML-ID an!
-     */
-    async function oeffneBearbeitenModal(uuid, status, flurname, version) {
-        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-        const spinner = document.getElementById('vinicoreMapSpinner');
-        if (spinner) spinner.classList.remove('hidden');
-
-        try {
-            // 🎯 Sperr-Anfrage ans Backend schießen
-            const response = await fetch(`/api/kataster/parzellen/lock/${uuid}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': token }
-            });
-
-            const data = await response.json();
-
-            // Falls ein anderer Winzer die Fläche blockiert (Status 423), brechen wir sofort ab!
-            if (!response.ok && response.status === 423) {
-                if (typeof zeigeVinicoreToast === 'function') {
-                    zeigeVinicoreToast('error', data.message || 'Diese Parzelle wird aktuell bearbeitet.');
-                } else {
-                    alert(data.message || 'Diese Parzelle wird aktuell von einem anderen Nutzer bearbeitet.');
-                }
-                return;
-            }
-
-            // Wenn die Fläche frei ist, befüllen wir deine realen HTML-Eingabefelder
-            document.getElementById('editUuid').value = uuid;
-            document.getElementById('editStatus').value = status;
-            document.getElementById('editLage').value = flurname;
-            document.getElementById('editVersion').value = version;
-            
-            const grundFeld = document.getElementById('editGrund');
-            
-            // 🚀 ULTRA-SAFE FIX: Bereinigt die Version von jeglichem Text-Müll und fängt auch Strings ab!
-            const saubereVersion = String(version).trim();
-            
-            if (saubereVersion === '1' || parseInt(saubereVersion) === 1) {
-                // 1. Setzt den unumstößlichen, amtlichen Standardtext ein
-                grundFeld.value = 'Erstaufnahme und erstmalige rechtliche Erfassung des Besitzverhältnisses';
-                // 2. Aktiviert den harten HTML-Schreibschutz
-                grundFeld.readOnly = true;
-                // 3. Färbt das Feld dezent grau ein, um die Blockade visuell anzuzeigen (Tailwind-Styles)
-                grundFeld.className = "w-full bg-slate-100 text-slate-500 border border-slate-200 p-2.5 rounded-xl font-medium focus:outline-none transition shadow-3xs text-xs leading-relaxed cursor-not-allowed";
-            } else {
-                // 1. Leert das Feld für neue, manuelle Revisions-Gründe
-                grundFeld.value = '';
-                // 2. Entfernt den Schreibschutz vollständig
-                grundFeld.readOnly = false;
-                // 3. Setzt das originale, reaktive Eingabe-Design wieder ein
-                grundFeld.className = "w-full bg-white border border-slate-200 p-2.5 rounded-xl font-medium focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition shadow-3xs text-xs leading-relaxed cursor-text";
-            }
-
-            // 🎯 PUNKTGENAU: Öffnet direkt dein echtes HTML-Skelett-Modal
-            document.getElementById('bearbeitenModal').classList.remove('hidden');
+    // 🚀 Macht den Slot unzerbrechlich sichtbar, bevor die Daten geladen werden!
+    slot.classList.remove('hidden');
+    slot.style.display = 'block';
+    
+    slot.innerHTML = `<div class="text-center py-6 text-slate-400 animate-pulse text-xs">📡 Synchronisiere Matrix...</div>`;
 
 
+    fetch(`/api/kataster/parzelle-details/${uuid}`, { 
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } 
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            const p = res.parzelle;
+            const m2Formatiert = Number(p.amtliche_flaeche_m2).toLocaleString('de-DE');
+            const euroFormatiert = Number(p.zugeordneter_wert).toFixed(2).replace('.', ',');
 
+            let statusPille = p.besitz_status === 'eigentum' 
+                ? '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">● Eigentum</span>' 
+                : '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">● Gepachtet</span>';
 
-        } catch (err) {
-            console.error("Fehler beim Setzen der Feldsperre:", err);
-            alert("Schnittstellen-Verbindung unterbrochen: Sperrstatus konnte nicht geprüft werden.");
-        } finally {
-            if (spinner) spinner.classList.add('hidden');
+            let agroHtml = p.anlage_name 
+                ? `<div class="space-y-1"><span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 rounded text-[10px] font-bold uppercase">🌿 ${p.anlage_name}</span></div>` 
+                : `<span class="text-slate-400 italic text-[10px]">Katasterfläche besitzt aktuell keine Bestockung</span>`;
+
+            slot.innerHTML = `
+                <div class="space-y-3 font-sans text-xs text-slate-700 animate-fadeIn p-1">
+                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2 shadow-3xs">
+                        <div class="flex justify-between items-start border-b border-slate-150 pb-2">
+                            <div>
+                                <h5 class="text-slate-900 font-extrabold text-sm mb-0.5">${p.gemarkung}</h5>
+                                <span class="text-slate-400 font-mono text-[10px]">Flur ${p.flur} | Nr. ${p.flurstueck_zaehler}</span>
+                            </div>
+                            <div>${statusPille}</div>
+                        </div>
+                        <div class="text-slate-500">Lage: <strong class="text-slate-700">${p.flurname_lage}</strong></div>
+                        <div class="flex justify-between border-t border-slate-150 pt-2 font-bold">
+                            <span>📐 Amtliche Fläche:</span><span>${m2Formatiert} m²</span>
+                        </div>
+                        <div class="flex justify-between border-t border-slate-150 pt-2 font-bold text-emerald-600 bg-emerald-50/40 p-1.5 rounded-lg border border-emerald-100">
+                            <span>💰 Kalkulierter Wert:</span><span>${euroFormatiert} €</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1.5 shadow-3xs">
+                        <h6 class="font-mono font-bold uppercase text-[9px] text-slate-400 tracking-wider border-b border-slate-150 pb-1">🍇 Agronomische Rebanlage</h6>
+                        ${agroHtml}
+                    </div>
+                </div>`;
         }
-    }
+    })
+    .catch(err => {
+        console.error(err);
+        slot.innerHTML = `<div class="text-red-500 font-medium p-2 text-center">Schnittstellen-Absturz im Datenholer.</div>`;
+    });
+}
 
-    /**
-     * 🔓 MODAL SCHLIESSEN MITSAMT LIVE RECORD-UNLOCKING
-     * 🚀 ORDENTLICHE REINHEIT: Schließt exakt das 'bearbeitenModal' und tilgt die Sperre!
-     */
-    async function schliesseBearbeitenModal() {
-        const uuid = document.getElementById('editUuid')?.value || '';
+function oeffneBearbeitenModal(uuid, status, flurname, version) {
+    document.getElementById('editUuid').value = uuid;
+    document.getElementById('editLage').value = flurname;
+    document.getElementById('editVersion').value = version;
+    
+    const statusDropdown = document.getElementById('editStatus');
+    const grundFeld = document.getElementById('editGrund');
+    if (!statusDropdown || !grundFeld) return;
+
+    // 🚀 INTELLIGENTE FINANZ-AUTOMATISIERUNG (NUR FÜR DIE ERSTPRÜFUNG V1)
+    if (parseInt(version) === 1) {
+        // A. Liest den Typus des Vertrags aus dem LocalStorage-Puffer [source: 1.1.2]
+        const tempVertrag = JSON.parse(localStorage.getItem('vinicore_temp_vertrag_stammdaten'));
         
-        // 🎯 PUNKTGENAU: Versteckt sofort dein reales HTML-Skelett-Modal
-        document.getElementById('bearbeitenModal').classList.add('hidden');
-
-        if (uuid) {
-            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            try {
-                // Feuert den Unlock lautlos im Hintergrund ab
-                await fetch(`/api/kataster/parzellen/unlock/${uuid}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': token }
-                });
-            } catch (err) {
-                console.error("Sperre konnte im Hintergrund nicht gelöscht werden:", err);
+        if (tempVertrag && tempVertrag.typ) {
+            if (tempVertrag.typ === 'pacht_aufwand') {
+                statusDropdown.value = 'gepachtet'; // 🌿 Automatisch gepachtet setzen
+            } else if (tempVertrag.typ === 'kauf') {
+                statusDropdown.value = 'eigentum';   // 💰 Automatisch Eigentum setzen
+            } else if (tempVertrag.typ === 'pacht_ertrag') {
+                statusDropdown.value = 'verpachtet'; // 🚜 Automatisch verpachtet setzen
             }
+            
+            // B. Aktiviert den harten Schreibschutz für das Dropdown-Feld
+            statusDropdown.disabled = true;
+            statusDropdown.className = "w-full bg-slate-100 text-slate-500 border border-slate-200 p-2.5 rounded-xl font-medium cursor-not-allowed text-xs";
         }
+
+        // Amtlichen Standardtext für die Erstaufnahme einbrennen
+        grundFeld.value = 'Erstaufnahme und erstmalige rechtliche Erfassung des Besitzverhältnisses';
+        grundFeld.readOnly = true;
+        grundFeld.className = "w-full bg-slate-100 text-slate-500 border border-slate-200 p-2.5 rounded-xl font-medium cursor-not-allowed text-xs";
+    
+    } else {
+        // 🔒 FOLGE-REVISIONEN (VERSION 2+): Der Besitz-Status ist unveränderbar versiegelt!
+        statusDropdown.value = status;
+        statusDropdown.disabled = true; // 🎯 HIER WIRD AB VERSION 2 STARR GESPERRT!
+        statusDropdown.className = "w-full bg-slate-100 text-slate-500 border border-slate-200 p-2.5 rounded-xl font-medium cursor-not-allowed text-xs";
         
-        // Leert die ID-Zuweisung im DOM
-        document.getElementById('editUuid').value = '';
+        // Die agronomische Lagebezeichnung und der Grund bleiben für Updates natürlich offen
+        grundFeld.value = '';
+        grundFeld.readOnly = false;
+        grundFeld.className = "w-full bg-white border border-slate-200 p-2.5 rounded-xl font-medium focus:border-blue-500 text-xs";
     }
+
+
+    // Modal auf dem Bildschirm einblenden
+    document.getElementById('bearbeitenModal').classList.remove('hidden');
+}
+
         /**
      * 🛰️ RECHTSPFEILER KARTE: REVISION & ERSTPRÜFUNG SPEICHERN
      * 🚀 ORDENTLICHE RESTAURIERUNG: Steht frei im globalen Skript-Scope, damit das HTML-Formular 
@@ -713,7 +741,9 @@
         if (event) { event.preventDefault(); }
         
         const uuid = document.getElementById('editUuid')?.value || '';
-        const status = document.getElementById('editStatus')?.value || 'eigentum';
+        // Liest den Wert unzerstörbar aus, völlig egal ob das Feld gesperrt ist oder nicht
+        const status = document.getElementById('editStatus').value;
+
         const flurname = document.getElementById('editLage')?.value || '';
         const grund = document.getElementById('editGrund')?.value || '';
 
@@ -782,62 +812,39 @@
             if (spinner) spinner.classList.add('hidden');
         }
     }
-    /**
-     * 💾 VERTRAGS-WARENKORB PROZESS-FINALE
-     * Schießt alle gelben Parzellen transaktionsgesichert ins Backend! [1]
-     */
-    async function speichereVertragsWarenkorb() {
-        if (vinicoreVertragsWarenkorb.length === 0) {
-            alert("Fehler: Dein Warenkorb ist leer. Klicke zuerst auf blaue Umlandflächen, um sie gelb zu markieren!");
-            return;
-        }
-
-        if (!vinicoreAktiveVertragId) {
-            alert("Kritisch: Keine aktive Vertrags-ID im URL-Scope gefunden.");
-            return;
-        }
-
-        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-        const spinner = document.getElementById('vinicoreMapSpinner');
-        if (spinner) spinner.classList.remove('hidden');
-
-        try {
-            const response = await fetch('/api/kataster/parzellen/speichern-sammelkorb', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json', 
-                    'Accept': 'application/json', 
-                    'X-CSRF-TOKEN': token 
-                },
-                body: JSON.stringify({
-                    vertrag_id: vinicoreAktiveVertragId,
-                    parzellen: vinicoreVertragsWarenkorb
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                alert("Erfolg: " + data.message);
-                // Korb leeren und Karte tiefenreinigen
-                vinicoreVertragsWarenkorb = [];
-                // Lädt die Karte neu – die frisch importierten Flächen leuchten jetzt fest Grün auf!
-                await ladeGeoJsonKataster(true);
-                if (umgebungsWfsLayer) umgebungsWfsLayer.clearLayers();
-                await ladeUmliegendeWfsParzellen();
-                
-                // ↩️ Optional: Automatische Rückleitung zum Vertragsformular im Büro
-                // window.location.href = `/vinicore-vertraege/bearbeiten/${vinicoreAktiveVertragId}`;
-            } else {
-                alert("ERP-Sperre: " + (data.message || "Fehler beim Einbuchen des Warenkorbs."));
-            }
-        } catch (err) {
-            console.error(err);
-            alert("Schnittstellen-Absturz: Der Korb konnte nicht verarbeitet werden.");
-        } finally {
-            if (spinner) spinner.classList.add('hidden');
-        }
+function speichereVertragsWarenkorb() {
+    if (vinicoreVertragsWarenkorb.length === 0) {
+        alert("Fehler: Dein Warenkorb ist leer. Klicke auf blaue Umlandflächen, um sie hinzuzufügen!");
+        return;
     }
 
+    // 💾 SPEICHERT TEMPORÄR IM BROWSER-SPEICHER (LOCALSTORAGE) [source: 1.1.2]
+    localStorage.setItem('vinicore_temporaere_parzellen', JSON.stringify(vinicoreVertragsWarenkorb));
+
+    alert("Flächen erfolgreich im Puffer zwischengespeichert! Wir kehren jetzt zum Vertragsformular zurück.");
+    
+    // Leitet zurück zum Formular im Büro
+    window.location.href = '/finanzen/vertrag-anlegen';
+}
+
+function entferneAusKorbDirekt(index) {
+    const feature = vinicoreVertragsWarenkorb[index];
+    if (!feature) return;
+    
+    const props = feature.properties;
+    const targetId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
+
+    vinicoreVertragsWarenkorb.splice(index, 1);
+
+    if (umgebungsWfsLayer) {
+        umgebungsWfsLayer.eachLayer(function(layer) {
+            const lp = layer.feature.properties;
+            if ((lp.gemarkung + '-' + lp.flur + '-' + lp.flurstueck) === targetId) {
+                umgebungsWfsLayer.resetStyle(layer);
+            }
+        });
+    }
+    rendereSammlerInspektor();
+}
 </script>
 @endsection

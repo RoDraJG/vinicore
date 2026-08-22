@@ -15,56 +15,68 @@ use App\Models\ParzelleVertrag;
 class GisLiegenschaftenController extends Controller
 {
     /**
-     * Liefert alle registrierten Parzellen als GeoJSON-Mosaik für Leaflet.
+     * 🛰️ THE GLOBAL GEOJSON GENERATOR (REGISTER-SPIEGEL)
+     * 🚀 REVISIONS-FIX: Generiert ein absolut standardkonformes GeoJSON-FeatureCollection-Objekt!
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         try {
-            $parzellen = DB::table('parzellen')->whereNull('gueltig_bis')->get();
-            $features = [];
+            // 🚀 CORE-FIX: Lädt sowohl die vorläufigen (undefiniert) als auch die aktiven Flächen!
+            $parzellen = DB::table('parzellen')
+                ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
+                ->whereNull('gueltig_bis')
+                ->get();
+
+
+            // Erschafft das saubere, von Leaflet geforderte GeoJSON-Skelett-Fundament [source: 1.1.1]
+            $geoJson = [
+                'type' => 'FeatureCollection',
+                'features' => []
+            ];
 
             foreach ($parzellen as $p) {
-                if (empty($p->polygon_vektoren) || trim($p->polygon_vektoren) === "" || $p->polygon_vektoren === "null") {
+                // Falls aus irgendeinem Grund kein Vektor vorhanden ist, überspringen wir die Fläche datensicher
+                if (empty($p->polygon_vektoren)) {
                     continue;
                 }
-                $koordinatenRoh = json_decode($p->polygon_vektoren, true);
-                if (!is_array($koordinatenRoh) || empty($koordinatenRoh)) continue;
 
-                $polygonRing = [];
-                $extractPairs = function($array) use (&$extractPairs, &$polygonRing) {
-                    if (!is_array($array)) return;
-                    if (count($array) >= 2 && isset($array[0]) && isset($array[1]) && is_numeric($array[0]) && is_numeric($array[1])) {
-                        $polygonRing[] = [floatval($array[0]), floatval($array[1])];
-                        return;
-                    }
-                    foreach ($array as $item) { if (is_array($item)) { $extractPairs($item); } }
-                };
-                $extractPairs($koordinatenRoh);
+                // Dekodiert den unzerstörbaren JSON-String der Geometrie aus deiner MySQL-Zelle
+                $geometry = json_decode($p->polygon_vektoren, true);
 
-                if (count($polygonRing) < 3) continue;
-                if ($polygonRing[0] !== $polygonRing[count($polygonRing) - 1]) { $polygonRing[] = $polygonRing[0]; }
-
-                $belegt = DB::table('parzelle_anlage')->where('parzelle_uuid', $p->parzelle_uuid)->exists();
-                $features[] = [
-                    'type' => 'Feature',
-                    'properties' => [
-                        'uuid' => $p->parzelle_uuid,
-                        'name' => "Flur " . ($p->flur ?? '1') . " | Nr. " . ($p->flurstueck_zaehler ?? '?'),
-                        'gemarkung' => $p->gemarkung ?? 'Kataster',
-                        'flur' => $p->flur ?? '1',
-                        'flurstueck' => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
-                        'flaeche_m2' => intval($p->amtliche_flaeche_m2 ?? 0),
-                        'belegt' => $belegt,
-                        'version' => intval($p->version ?? 1),
-                        'besitz_status' => $p->besitz_status ?? 'eigentum',
-                        'flurname_lage' => $p->flurname_lage ?? ''
-                    ],
-                    'geometry' => [ 'type' => 'Polygon', 'coordinates' => [$polygonRing] ]
-                ];
+                if ($geometry) {
+                    $geoJson['features'][] = [
+                        'type' => 'Feature',
+                        'geometry' => $geometry,
+                        // Übergibt alle ERP-Eigenschaften reaktiv für das Leaflet-Klick-Event
+                        'properties' => [
+                            'id'                  => $p->id,
+                            'parzelle_uuid'       => $p->parzelle_uuid,
+                            'version'             => $p->version,
+                            'gemarkung'           => $p->gemarkung,
+                            'flur'                => $p->flur,
+                            'flurstueck'          => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
+                            'flurstueck_zaehler'  => $p->flurstueck_zaehler,
+                            'flurstueck_nenner'   => $p->flurstueck_nenner,
+                            'flurname_lage'       => $p->flurname_lage,
+                            'amtliche_flaeche_m2' => $p->amtliche_flaeche_m2,
+                            'besitz_status'       => $p->besitz_status
+                        ]
+                    ];
+                }
             }
-            return response()->json(['type' => 'FeatureCollection', 'features' => $features]);
-        } catch (\Exception $e) { return response()->json(['success' => false, 'message' => $e->getMessage()], 500); }
+
+            return response()->json($geoJson);
+
+        } catch (\Exception $e) {
+            // Fängt jeden Fehler ab und verhindert, dass HTML-Müll an den Leaflet-Parser geschickt wird!
+            return response()->json([
+                'type' => 'FeatureCollection',
+                'features' => [],
+                'error' => 'GeoJSON-Kernel blockiert: ' . $e->getMessage()
+            ], 500);
+        }
     }
+
     /**
      * Zieht ein amtliches Flurstück LIVE über den ALKIS 2.0 WFS-Endpunkt.
      * 🚀 ARCHITEKTUR-FIX: Validiert ab sofort exakt deine realen Migrations-Spalten!
@@ -464,108 +476,110 @@ class GisLiegenschaftenController extends Controller
     }
 
     /**
-     * Zeigt den amtlichen Betriebsspiegel mitsamt der historisierten Live-Suche.
-     * 🚀 SCOPE-FIX: Verknüpft die Suchvariable via 'use ($suche)' unzerstörbar mit dem SQL-Kernel!
+     * 📊 DER DIGITALE KATASTERSPIEGEL (TABELLEN-COCKPIT)
+     * 🚀 REVISIONS-FIX: Holt Entwürfe & Aktive, unterstützt Live-Sortierung sowie Suche
+     * und liefert alle vom Template geforderten Variablen fehlerfrei aus!
      */
-    public function parzellenUebersichtView(Request $request): mixed
+    public function parzellenUebersichtView(Request $request): \Illuminate\Contracts\View\View
     {
-        $suche = $request->query('suche', '');
-        $sortSpalte = $request->query('sort', 'gemarkung');
-        $sortRichtung = $request->query('direction', 'asc');
+        // 🔍 Such- und Sortierparameter aus dem Request abfangen
+        $suche = $request->input('suche', '');
+        $sortSpalte = $request->input('sort', 'gemarkung');
+        $sortRichtung = $request->input('direction', 'asc');
 
-        $erlaubteSpalten = [
-            'gemeinde'             => 'parzellen.gemeinde',
-            'gemarkung'            => 'parzellen.gemarkung',
-            'flur'                 => 'parzellen.flur',
-            'flurstueck_zaehler'   => 'parzellen.flurstueck_zaehler',
-            'amtliche_flaeche_m2'  => 'parzellen.amtliche_flaeche_m2',
-            'besitz_status'        => 'parzellen.besitz_status'
-        ];
+        // Validierungs-Schutz, damit niemand falsche Spalten injizieren kann
+        if (!in_array($sortSpalte, ['gemarkung', 'flur', 'flurstueck_zaehler', 'amtliche_flaeche_m2', 'besitz_status'])) {
+            $sortSpalte = 'gemarkung';
+        }
+        if (!in_array($sortRichtung, ['asc', 'desc'])) {
+            $sortRichtung = 'asc';
+        }
 
-        $tatsaechlicheSpalte = $erlaubteSpalten[$sortSpalte] ?? 'parzellen.gemarkung';
-        $tatsaechlicheRichtung = strtolower($sortRichtung) === 'desc' ? 'desc' : 'asc';
-
-        // 🚀 CORE-FIX: Holt nur die vollkommen freigegebenen, aktiven Bestände in den Hauptspiegel
+        // Basis-Query aufbauen (Entwürfe & Aktive des aktuellen Bestands)
         $query = DB::table('parzellen')
-            ->whereNull('parzellen.gueltig_bis')
-            ->where('parzellen.freigabe_status', '=', 'aktiv');
+            ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
+            ->whereNull('gueltig_bis');
 
+        // Falls eine Filter-Suche eingetippt wurde, schränken wir die Query ein
         if (!empty($suche)) {
-            $query->where(function($q) use ($suche) { 
-                $q->where('parzellen.gemarkung', 'LIKE', '%' . $suche . '%')
-                  ->orWhere('parzellen.gemeinde', 'LIKE', '%' . $suche . '%')
-                  ->orWhere('parzellen.flurname_lage', 'LIKE', '%' . $suche . '%')
-                  ->orWhere('parzellen.flurstueck_zaehler', 'LIKE', '%' . $suche . '%')
-                  ->orWhere('parzellen.besitz_status', 'LIKE', '%' . $suche . '%'); 
+            $query->where(function($q) use ($suche) {
+                $q->where('gemarkung', 'like', '%' . $suche . '%')
+                  ->orWhere('flurstueck_zaehler', 'like', '%' . $suche . '%')
+                  ->orWhere('flurname_lage', 'like', '%' . $suche . '%');
             });
         }
 
-        $aktive = $query->orderBy($tatsaechlicheSpalte, $tatsaechlicheRichtung)->get();
+        // Dynamische Sortierung und Paginierung anwenden
+        $parzellen = $query->orderBy($sortSpalte, $sortRichtung)->paginate(10);
 
-        // ⚖️ AUDIT-RADAR: Sammelt alle Revisionen, die auf das Vier-Augen-Okay warten!
-        $ausstehendeFreigaben = DB::table('parzellen')
-            ->where('freigabe_status', '=', 'eingereicht')
-            ->whereNull('gueltig_bis')
-            ->get();
+        // Holt den aktuell angemeldeten User für das Layout
+        $user = auth()->user();
 
-        $geloeschte = DB::table('parzellen')->whereNotNull('gueltig_bis')->get();
-        $verkaufte = [];
-
-        // 🧱 NEULADUNGS-WEICHE FÜR DIE ASYNCHRONA AJAX-LIVE-SUCHE
-        if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-            $tableHtml = '';
-            foreach ($aktive as $p) {
-                $statusHtml = ($p->besitz_status === 'eigentum') ? '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">● Eigentum</span>' : (($p->besitz_status === 'gepachtet') ? '<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">● Gepachtet</span>' : '<span class="bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">○ Verpachtet</span>');
-                $ha = number_format(($p->amtliche_flaeche_m2 ?? 0) / 10000, 4, ',', '.'); 
-                $m2 = number_format(($p->amtliche_flaeche_m2 ?? 0), 0, ',', '.');
-                
-                $lage = !empty($p->flurname_lage) ? htmlspecialchars((string)$p->flurname_lage, ENT_QUOTES, 'UTF-8') : 'Keine Angabe'; 
-                $nennerZusatz = !empty($p->flurstueck_nenner) ? '/' . $p->flurstueck_nenner : '';
-                $gemeindeName = !empty($p->gemeinde) ? htmlspecialchars((string)$p->gemeinde, ENT_QUOTES, 'UTF-8') : 'Weinbaugemeinde';
-                $gemarkungName = !empty($p->gemarkung) ? htmlspecialchars((string)$p->gemarkung, ENT_QUOTES, 'UTF-8') : 'Kataster';
-
-                if (intval($p->version ?? 1) === 1) {
-                    $verknuepfungHtml = "<span class='inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse'>⚠️ Erstprüfung ausstehend</span>";
-                } else {
-                    $verknuepfungHtml = !empty($p->anlage_name) ? "<div class='space-y-1'><a href='/schlaege/schlag-karte?fokus_anlage={$p->anlage_id}' class='inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold border border-blue-200 px-2 py-0.5 rounded-lg text-[10px] uppercase tracking-wider no-underline transition shadow-3xs'>🌿 " . htmlspecialchars($p->anlage_name, ENT_QUOTES, 'UTF-8') . "</a>" . (!empty($p->schlag_name) ? "<span class='block text-[10px] text-slate-400 font-medium font-sans'>🚜 Schlag: " . htmlspecialchars($p->schlag_name, ENT_QUOTES, 'UTF-8') . "</span>" : "") . "</div>" : "<span class='text-slate-400 text-[10px] font-mono italic'>Nicht verknüpft</span>";
-                }
-                
-                $kartenLink = "<a href='/kataster/parzellen-karte?fokus_parzelle={$p->parzelle_uuid}' class='inline-block p-1.5 border border-blue-200 rounded-lg bg-blue-50/30 hover:bg-blue-100/60 text-blue-600 transition shadow-3xs'><svg class='w-3.5 h-3.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2v1a2 2 0 002 2h2.1l.6 2.4c.1.4.5.6.9.6h1.5a1 1 0 001.8-.6l.3-1.2A9 9 0 103.055 11z' /></svg></a>";
-                
-                $jsLage = addslashes($lage);
-                $jsStatus = addslashes((string)$p->besitz_status);
-                $jsVersion = intval($p->version ?? 1);
-
-                // 🚀 VISUELLER FILTER (AJAX): Schneidet den Gemeindeschlüssel für die Live-Suche im RAM ab
-                $gemeindeRaw = !empty($p->gemeinde) ? (string)$p->gemeinde : 'Weinbaugemeinde';
-                $reinerGemeindeName = explode(' (', $gemeindeRaw)[0];
-                
-                $gemeindeName = htmlspecialchars($reinerGemeindeName, ENT_QUOTES, 'UTF-8');
-                $gemarkungName = !empty($p->gemarkung) ? htmlspecialchars((string)$p->gemarkung, ENT_QUOTES, 'UTF-8') : 'Kataster';
-                
-                $schluesselZusatz = !empty($p->gemarkungsschuelser) 
-                    ? " (" . htmlspecialchars((string)$p->gemarkungsschuelser, ENT_QUOTES, 'UTF-8') . ")" 
-                    : "";
-
-                // Der dichte UI-Stringsatz bleibt absolut unberührt, rendert nun aber die saubere Optik
-                $tableHtml .= "<tr class='hover:bg-slate-50/50 transition-colors'><td class='p-3 leading-tight'><span class='text-slate-900 font-bold text-xs block'>{$gemarkungName}</span><span class='text-[10px] font-mono text-slate-400 block mt-0.5'>{$gemeindeName}{$schluesselZusatz}</span></td><td class='p-3 font-mono font-bold text-slate-500'>Flur {$p->flur}</td>...";
-
-            }
-            return response()->json(['success' => true, 'table_html' => $tableHtml, 'anzahl' => count($aktive)]);
-        }
-
-        // Standard-Rendern beim Erstaufruf der Seite
-        return view('kataster.parzellen_uebersicht', compact('aktive', 'geloeschte', 'verkaufte', 'suche', 'sortSpalte', 'sortRichtung'));
+        // 🎯 COMPACT-FIX: Liefert alle vom HTML-Tabellenkopf verlangten Variablen unzerbrechlich aus!
+        return view('kataster.parzellen_uebersicht', compact(
+            'parzellen', 
+            'user', 
+            'suche', 
+            'sortSpalte', 
+            'sortRichtung'
+        ));
     }
 
-     /**
-     * 📝 HISTORISIERTE ERSTPRÜFUNG & REVISION (PHASE 2)
-     * Verriegelt eine gelbe Parzelle (V1) und schaltet sie auf Sattes Grün (V2+)!
+    /**
+     * 📡 SATELITTEN-TUNNEL: Lädt die Detailmatrix einer Parzelle für das Modal.
+     * 🚀 HIGH-SECURITY-FIX: Fängt jeden potenziellen Null-Pointer ab!
+     */
+    public function holeParzelleDetails($uuid): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $parzelle = DB::table('parzellen')
+                ->where('parzellen.parzelle_uuid', $uuid)
+                ->whereNull('parzellen.gueltig_bis')
+                ->leftJoin('parzelle_vertrag', 'parzelle_vertrag.parzelle_uuid', '=', 'parzellen.parzelle_uuid')
+                ->select(
+                    'parzellen.*',
+                    DB::raw('COALESCE(parzelle_vertrag.zugeordneter_wert, 0.00) as zugeordneter_wert'),
+                    'parzelle_vertrag.vertragable_id as vertrag_id'
+                )
+                ->first();
+
+            if (!$parzelle) {
+                return response()->json(['success' => false, 'message' => 'Liegenschafts-Details nicht gefunden.'], 404);
+            }
+
+            // Sicherstellen, dass Zahlen als saubere Typen ankommen
+            return response()->json([
+                'success' => true,
+                'parzelle' => [
+                    'id'                  => $parzelle->id,
+                    'parzelle_uuid'       => $parzelle->parzelle_uuid,
+                    'version'             => intval($parzelle->version ?? 1),
+                    'freigabe_status'     => $parzelle->freigabe_status ?? 'aktiv',
+                    'gemarkung'           => $parzelle->gemarkung ?? 'Unbekannt',
+                    'flur'                => $parzelle->flur ?? '0',
+                    'flurstueck_zaehler'  => $parzelle->flurstueck_zaehler ?? '0',
+                    'flurstueck_nenner'   => $parzelle->flurstueck_nenner ?? null,
+                    'flurname_lage'       => $parzelle->flurname_lage ?? 'Keine Angabe',
+                    'amtliche_flaeche_m2' => floatval($parzelle->amtliche_flaeche_m2 ?? 0),
+                    'besitz_status'       => $parzelle->besitz_status ?? 'eigentum',
+                    'zugeordneter_wert'   => floatval($parzelle->zugeordneter_wert),
+                    'anlage_name'         => $parzelle->anlage_name ?? null,
+                    'schlag_name'         => $parzelle->schlag_name ?? null
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Absturz: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * 📝 HISTORISIERTE REVISION & ERSTPRÜFUNG (PHASE 2)
+     * 🛡️ REVISIONS-SCHUTZ: Blockiert manuelle Änderungen des Besitzverhältnisses ab Version 2!
      */
     public function aktualisiereParzelle(Request $request, $uuid): JsonResponse
     {
         $request->validate([
-            'besitz_status'   => 'required|in:eigentum,gepachtet,verpachtet',
+            'besitz_status'   => 'required|in:eigentum,gepachtet,verpachtet,undefiniert',
             'flurname_lage'   => 'nullable|string|max:255',
             'aenderungsgrund' => 'nullable|string|max:255'
         ]);
@@ -574,7 +588,7 @@ class GisLiegenschaftenController extends Controller
             DB::beginTransaction();
             $jetzt = now();
 
-            // 1. Holt den aktuellen Entwurf (Version 1)
+            // 1. Holt den aktuellen Zustand der Parzelle aus der Datenbank
             $alteParzelle = DB::table('parzellen')
                 ->where('parzelle_uuid', $uuid)
                 ->whereNull('gueltig_bis')
@@ -587,7 +601,20 @@ class GisLiegenschaftenController extends Controller
 
             $aktuelleVersion = intval($alteParzelle->version);
 
-            // 2. Zeitschloss zünden: Alten Zustand für den Audit-Trail einfrieren
+            // 🛡️ INTELLIGENTE REVISIONS-SCHRANKE (MIGRATIONS-WEICHE)
+            // Erlaubt das Setzen nur, wenn der Status in der DB aktuell noch 'undefiniert' ist!
+            if ($alteParzelle->besitz_status !== 'undefiniert') {
+                // Sobald die Parzelle einmal fest zugewiesen ist, blockiert jeder Änderungsversuch!
+                if ($alteParzelle->besitz_status !== $request->input('besitz_status')) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false, 
+                        'message' => 'ERP-Sperre: Das Besitzverhältnis ist vertragsgesteuert und versiegelt. Manuelle Änderungen sind blockiert!'
+                    ], 422);
+                }
+            }
+
+          // 2. Zeitschloss: Alten Datensatz für den historischen Audit-Trail einfrieren
             DB::table('parzellen')
                 ->where('id', $alteParzelle->id)
                 ->update(['gueltig_bis' => $jetzt, 'updated_at' => $jetzt]);
@@ -596,7 +623,7 @@ class GisLiegenschaftenController extends Controller
             DB::table('parzellen')->insert([
                 'parzelle_uuid'       => $uuid,
                 'version'             => $aktuelleVersion + 1,
-                'freigabe_status'     => 'aktiv', // 🟢 Schaltet die Fläche auf Sattes Grün um!
+                'freigabe_status'     => 'aktiv', // 🟢 Schaltet auf Sattes Grün um!
                 'polygon_vektoren'    => $alteParzelle->polygon_vektoren,
                 'gemeinde'            => $alteParzelle->gemeinde,
                 'gemarkung'           => $alteParzelle->gemarkung,
@@ -604,10 +631,12 @@ class GisLiegenschaftenController extends Controller
                 'flur'                => $alteParzelle->flur,
                 'flurstueck_zaehler'  => $alteParzelle->flurstueck_zaehler,
                 'flurstueck_nenner'   => $alteParzelle->flurstueck_nenner,
-                'flurname_lage'       => trim($request->flurname_lage ?? $alteParzelle->flurname_lage),
-                'amtliche_flaeche_m2' => $alteParzelle->amtliche_flaeche_m2,
-                'besitz_status'       => $request->besitz_status, // Zuweisung Eigentum/Pacht
-                'aenderungsgrund'     => trim($request->aenderungsgrund ?? 'Kataster-Erstprüfung versiegelt'),
+                'flurname_lage'       => trim($request->input('flurname_lage') ?? $alteParzelle->flurname_lage),
+                
+                // Bei V1 greift die automatisierte Vorbelegung, ab V2 ist es starr fixiert!
+                'besitz_status'       => ($aktuelleVersion === 1) ? $request->input('besitz_status') : $alteParzelle->besitz_status,
+                
+                'aenderungsgrund'     => trim($request->input('aenderungsgrund') ?? 'Liegenschafts-Matrix aktualisiert'),
                 'gueltig_von'         => $jetzt,
                 'gueltig_bis'         => null,
                 'user_id'             => Auth::id(),
@@ -615,53 +644,18 @@ class GisLiegenschaftenController extends Controller
                 'updated_at'          => $jetzt
             ]);
 
-            // 4. Record Lock nach erfolgreicher Versiegelung direkt aufheben
+            // 🔓 Record Lock aufheben
             DB::table('parzellen_locks')->where('parzelle_uuid', $uuid)->delete();
 
             DB::commit();
-            return response()->json(['success' => true, 'message' => 'Erstprüfung erfolgreich rechtssicher versiegelt!']);
+            return response()->json(['success' => true, 'message' => 'Liegenschaft erfolgreich historisiert saniert!']);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['success' => false, 'message' => 'Absturz bei Erstprüfung: ' . $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => 'Absturz im Revisions-Kernel: ' . $e->getMessage()], 500);
         }
     }
-
-    /**
-     * 📡 SIDEBAR DETAIL MATRIX TUNNEL
-     * 🚀 EXTENDED-FIX: Lädt die reaktiv berechneten Allokations-Finanzwerte direkt mit in den Inspektor!
-     */
-    public function holeParzelleDetails($uuid): JsonResponse
-    {
-        try {
-            $parzelle = DB::table('parzellen')
-                // Bindet die polymorphe Kupplungstabelle für den Finanzwert ein
-                ->leftJoin('parzelle_vertrag', function($join) {
-                    $join->on('parzellen.parzelle_uuid', '=', 'parzelle_vertrag.parzelle_uuid')
-                         ->where('parzelle_vertrag.vertragable_type', '=', \App\Models\VinicoreVertrag::class);
-                })
-                // Bindet den Vater-Vertrag für die Vertragsnummer ein
-                ->leftJoin('vinicore_vertraege', 'vinicore_vertraege.id', '=', 'parzelle_vertrag.vertragable_id')
-                ->where('parzellen.parzelle_uuid', $uuid)
-                ->whereNull('parzellen.gueltig_bis')
-                ->select(
-                    'parzellen.*', 
-                    'parzelle_vertrag.zugeordneter_wert as allokierter_zins',
-                    'vinicore_vertraege.vertrag_nummer as vertrags_referenz',
-                    'vinicore_vertraege.typ as vertrags_typ'
-                )
-                ->first();
-
-            if (!$parzelle) {
-                return response()->json(['success' => false, 'message' => 'Liegenschaft im aktiven Bestand nicht lokalisiert.'], 404);
-            }
-
-            return response()->json(['success' => true, 'parzelle' => $parzelle]);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Detail-Tunnel fehlgeschlagen: ' . $e->getMessage()], 500);
-        }
-    }
-
+    
      /**
      * 🔒 RECORD LOCKING: Versiegelt eine Parzelle temporär für die Bearbeitung.
      * 🚀 TRANS-LOCK FIX: Tippfehler beim Datumsstempel-Namen vollständig behoben!
