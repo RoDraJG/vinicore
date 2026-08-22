@@ -9,8 +9,8 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
-
-
+use App\Models\VinicoreVertrag;
+use App\Models\ParzelleVertrag;
 
 class GisLiegenschaftenController extends Controller
 {
@@ -149,113 +149,184 @@ class GisLiegenschaftenController extends Controller
             return response()->json(['success' => true, 'mehrfach_treffer' => false, 'feature' => ['type' => 'Feature', 'geometry' => [ 'type' => 'Polygon', 'coordinates' => [$polygonVektoren] ], 'properties' => [ 'gemarkung' => $amtlicheGemarkung, 'flur' => $reineFlurZahl, 'flurstueck' => $vollstaendigeNummer, 'flaeche_m2' => isset($f->flaeche) ? intval(trim((string)$f->flaeche)) : 1365, 'name' => $amtlicheGemarkung . " | Flur " . $reineFlurZahl . " | Nr. " . $vollstaendigeNummer ]]]);
         } catch (\Exception $e) { return response()->json(['success' => false, 'message' => $e->getMessage()], 500); }
     }
-/**
-     * 📥 SAMMEL-IMPORT (REIN KATASTERWESEN)
-     * 🚀 SECURED-MATRIX: Verhindert Undefined-Key-Explosionen bei glatten Flurstücksnummern!
+    /**
+     * 📥 CONTRACT-DRIVEN CART-IMPORT (KATASTERWESEN)
+     * 🚀 CORE-LOGIK: Speichert die gesammelten Warenkorb-Parzellen aus der Karte 
+     * in einem transaktionsgesicherten Rutsch direkt im Zustand 'undefiniert' (V1)!
      */
     public function speichereInDatenbank(Request $request): JsonResponse
     {
-        $request->validate(['parzellen' => 'required|array']);
+        $request->validate([
+            'vertrag_id' => 'required|integer',
+            'parzellen'  => 'required|array'
+        ]);
+
         try {
             DB::beginTransaction(); 
             $jetzt = now();
-            
-            foreach ($request->input('parzellen', []) as $einzelneParzelle) {
+            $vertragId = intval($request->input('vertrag_id'));
+
+            // 🛡️ SICHERHEITS-CHECK: Existiert der Vater-Vertrag überhaupt im System?
+            $vertrag = DB::table('vinicore_vertraege')->where('id', $vertragId)->first();
+            if (!$vertrag) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Kritischer Fehler: Der angewählte Finanzvertrag existiert nicht.'], 404);
+            }
+
+            // Holt die globale Standard-Allokation des Betriebs
+            $einstellungen = DB::table('betriebseinstellungen')->where('betrieb_id', Auth::user()->betrieb_id)->first();
+            $allokationsModell = $einstellungen ? $einstellungen->standard_allokation : 'modell_a';
+
+            $importierteParzellen = $request->input('parzellen', []);
+            $neueParzellenUuids = [];
+
+            foreach ($importierteParzellen as $einzelneParzelle) {
                 $props = $einzelneParzelle['properties'] ?? []; 
                 $geometry = $einzelneParzelle['geometry'] ?? null;
                 
-                $gemarkung = trim($props['gemarkung'] ?? $props['gemarkungsname'] ?? 'Unbekannt');
+                $gemarkung = trim($props['gemarkung'] ?? 'Unbekannt');
                 $flur = !empty($props['flur']) ? intval(preg_replace('/[^\d]/', '', $props['flur'])) : 1;
                 
                 $flurstueckRaw = trim($props['flurstueck'] ?? ''); 
                 $teile = explode('/', $flurstueckRaw);
-                
-                // 🚀 CORE-FIX: Fängt das Fehlen eines Nenners textsicher ab, um Undefined Key 1 zu vernichten!
-                $zaehlerRaw = $teile[0] ?? $flurstueckRaw;
-                $zaehler = preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $zaehlerRaw));
-                
-                $nenner = null;
-                if (count($teile) > 1 && isset($teile[1]) && trim($teile[1]) !== '0' && trim($teile[1]) !== '') {
-                    $nenner = preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $teile[1]));
-                }
+                $zaehler = preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $teile[0] ?? $flurstueckRaw));
+                $nenner = (count($teile) > 1 && trim($teile[1]) !== '0' && trim($teile[1]) !== '') ? preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $teile[1])) : null;
 
-                // Extraktion: Holt den reinen Gemeindenamen und trennt alte AGS-Klammern
-                $gemeindeRaw = trim($props['gemeinde'] ?? $props['gemeindename'] ?? 'Weinbaugemeinde');
-                $gemeindeTeile = explode(' (', $gemeindeRaw);
-                $gemeindeEintrag = trim($gemeindeTeile[0]);
-
-                // Holt den amtlichen Gemarkungsschlüssel
-                $gemaschlRaw = trim($props['gemarkungsschuelser'] ?? $props['gemaschl'] ?? '');
-
-                $aktiveVersionExistiert = DB::table('parzellen')
-                    ->where('gemarkung', 'LIKE', $gemarkung)
+                // 🛡️ REVISIONSSCHUTZ: Prüfen, ob genau dieses Flurstück bereits AKTIV im Betrieb steht
+                $existiertBereits = DB::table('parzellen')
+                    ->where('gemarkung', '=', $gemarkung)
                     ->where('flur', $flur)
-                    ->where('flurstueck_zaehler', $zaehler)
-                    ->where(function($q) use ($nenner) { 
-                        if (empty($nenner)) { 
-                            $q->whereNull('flurstueck_nenner')->orWhere('flurstueck_nenner', '0')->orWhere('flurstueck_nenner', ''); 
-                        } else { 
-                            $q->where('flurstueck_nenner', $nenner); 
-                        } 
+                    ->where('flurstueck_zaehler', '=', $zaehler)
+                    ->where(function($q) use ($nenner) {
+                        if (empty($nenner)) { $q->whereNull('flurstueck_nenner')->orWhere('flurstueck_nenner', '=', ''); }
+                        else { $q->where('flurstueck_nenner', '=', $nenner); }
                     })
                     ->whereNull('gueltig_bis')
-                    ->first();
-                    
-                if ($aktiveVersionExistiert) continue; 
+                    ->exists();
 
-                $archivierteVersion = DB::table('parzellen')
-                    ->where('gemarkung', 'LIKE', $gemarkung)
-                    ->where('flur', $flur)
-                    ->where('flurstueck_zaehler', $zaehler)
-                    ->where(function($q) use ($nenner) { 
-                        if (empty($nenner)) { 
-                            $q->whereNull('flurstueck_nenner')->orWhere('flurstueck_nenner', '0')->orWhere('flurstueck_nenner', ''); 
-                        } else { 
-                            $q->where('flurstueck_nenner', $nenner); 
-                        } 
-                    })
-                    ->whereNotNull('gueltig_bis')
-                    ->orderBy('version', 'desc')
-                    ->first();
-                    
-                $neueUuid = (string) Str::uuid(); 
-                $neueVersion = 1; 
-                $grund = 'Erstaufnahme via vinicore ALKIS-Karte';
-                
-                if ($archivierteVersion) { 
-                    $neueUuid = $archivierteVersion->parzelle_uuid; 
-                    $neueVersion = intval($archivierteVersion->version) + 1; 
-                    $grund = 'Reaktivierung / Erneute Betriebsaufnahme via ALKIS-Karte'; 
+                if ($existiertBereits) {
+                    continue; // Überspringen, da die Fläche bereits im echten Betriebsspiegel aktiv ist!
                 }
 
-                DB::table('parzellen')->insert([
-                    'parzelle_uuid' => $neueUuid, 
-                    'version' => $neueVersion, 
-                    'polygon_vektoren' => $geometry ? json_encode($geometry) : null, 
-                    'gemeinde' => $gemeindeEintrag, 
-                    'gemarkung' => $gemarkung, 
-                    'gemarkungsschuelser' => $gemaschlRaw,
-                    'flur' => $flur, 
-                    'flurstueck_zaehler' => $zaehler, 
-                    'flurstueck_nenner' => $nenner, 
-                    'flurname_lage' => trim($props['flurname_lage'] ?? $props['lagebeztxt'] ?? 'Kataster-Lage'), 
-                    'amtliche_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0), 
-                    'besitz_status' => 'eigentum', 
-                    'aenderungsgrund' => $grund, 
-                    'gueltig_von' => $jetzt, 
-                    'gueltig_bis' => null, 
-                    'created_at' => $jetzt, 
-                    'updated_at' => $jetzt,
-                    'user_id' => Auth::id()
+                $neueUuid = (string) Str::uuid();
 
+                // 🧱 1. Flurstück im Zustand UNDEFINIERT (Version 1) in die parzellen-Tabelle stanzen
+                DB::table('parzellen')->insert([
+                    'parzelle_uuid'       => $neueUuid,
+                    'version'             => 1,
+                    'freigabe_status'     => 'undefiniert', // 🟡 Erscheint reaktiv Gelb auf der Karte!
+                    'polygon_vektoren'    => $geometry ? json_encode($geometry) : null,
+                    'gemeinde'            => trim($props['gemeinde'] ?? 'Weinbaugemeinde'),
+                    'gemarkung'           => $gemarkung,
+                    'gemarkungsschuelser' => trim($props['gemarkungsschuelser'] ?? $props['gemaschl'] ?? null),
+                    'flur'                => $flur,
+                    'flurstueck_zaehler'  => $zaehler,
+                    'flurstueck_nenner'   => $nenner,
+                    'flurname_lage'       => trim($props['flurname_lage'] ?? 'Flur ' . $flur . ' | Nr. ' . $flurstueckRaw),
+                    'amtliche_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0),
+                    'besitz_status'       => 'undefiniert', // Wirtschaftlich noch völlig neutral
+                    'aenderungsgrund'     => 'In den Pacht/Kaufvertrags-Warenkorb aufgenommen',
+                    'gueltig_von'         => $jetzt,
+                    'gueltig_bis'         => null,
+                    'user_id'             => Auth::id(),
+                    'created_at'          => $jetzt,
+                    'updated_at'          => $jetzt
                 ]);
+
+                // 🧱 2. Die polymorthe Beziehung in parzelle_vertrag einhängen
+                DB::table('parzelle_vertrag')->insert([
+                    'parzelle_uuid'          => $neueUuid,
+                    'vertragable_id'         => $vertragId,
+                    'vertragable_type'       => \App\Models\VinicoreVertrag::class, // Morph-Kopplung
+                    'zugeordneter_wert'      => 0.00, // Wird gleich im Anschluss berechnet!
+                    'zugeordnete_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0),
+                    'user_id'                => Auth::id(),
+                    'created_at'             => $jetzt,
+                    'updated_at'             => $jetzt
+                ]);
+
+                $neueParzellenUuids[] = $neueUuid;
             }
-            
+
+            // 📊 3. AUTOMATISCHE KASKADEN-ALLOKATION AUSFÜHREN (Modell A oder C)
+            if (!empty($neueParzellenUuids)) {
+                $this->berechneVertragsAllokationKaskade($vertragId);
+            }
+
             DB::commit(); 
-            return response()->json(['success' => true, 'message' => 'Auswahl erfolgreich verarbeitet!']);
+            return response()->json(['success' => true, 'message' => 'Warenkorb erfolgreich im Vertrag versiegelt und Allokation berechnet!']);
+
         } catch (\Exception $e) { 
             DB::rollBack(); 
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500); 
+            return response()->json(['success' => false, 'message' => 'Kernel-Absturz beim Warenkorb-Insert: ' . $e->getMessage()], 500); 
+        }
+    }
+    /**
+     * 📊 MATHEMATISCHE HIERARCHISCHE KASKADEN-ALLOKATION
+     * Berechnet reaktiv die Euro-Werte der Parzellen innerhalb eines Vertrags!
+     */
+    private function berechneVertragsAllokationKaskade(int $vertragId): void
+    {
+        $vertrag = DB::table('vinicore_vertraege')->where('id', $vertragId)->first();
+        if (!$vertrag) return;
+
+        $gesamtwert = floatval($vertrag->gesamtwert);
+
+        // 1. Holt alle zugeordneten Verknüpfungen für diesen Vertrag
+        $zuordnungen = DB::table('parzelle_vertrag')
+            ->where('vertragable_id', $vertragId)
+            ->where('vertragable_type', \App\Models\VinicoreVertrag::class)
+            ->get();
+
+        if ($zuordnungen->isEmpty()) return;
+
+        // 2. STUFE 1 & 2: Manuelle Werte (Modell B) herausfiltern und Restwert ermitteln
+        $manuelleSumme = 0;
+        $automatischeZuordnungen = [];
+        $automatischeGesamtFlaeche = 0;
+
+        foreach ($zuordnungen as $z) {
+            // Wenn der Wert manuell eingetippt wurde (wir definieren: Wert wurde in einer separaten Edit-Aktion gesetzt)
+            // Hier prüfen wir, ob ein temporäres Flag oder ein manueller Eintrag vorliegt. 
+            // Standardmäßig nach dem Korb-Import ist alles automatisiert (0.00).
+            if (isset($z->ist_manuell) && $z->ist_manuell) {
+                $manuelleSumme += floatval($z->zugeordneter_wert);
+            } else {
+                $automatischeZuordnungen[] = $z;
+                $automatischeGesamtFlaeche += intval($z->zugeordnete_flaeche_m2 ?: 0);
+            }
+        }
+
+        $restBetrag = $gesamtwert - $manuelleSumme;
+        if ($restBetrag < 0) $restBetrag = 0; // Überbuchungsschutz
+
+        // Holt das Standardmodell des Betriebs (Modell A = Hektar, Modell C = Gleich)
+        $einstellungen = DB::table('betriebseinstellungen')->where('betrieb_id', $vertrag->betrieb_id)->first();
+        $modus = $einstellungen ? $einstellungen->standard_allokation : 'modell_a';
+
+        // 3. STUFE 3: Restwert auf die automatischen Flächen verteilen
+        $anzahlAuto = count($automatischeZuordnungen);
+        if ($anzahlAuto === 0) return;
+
+        foreach ($automatischeZuordnungen as $az) {
+            $neuerWert = 0.00;
+
+            if ($modus === 'modell_a' && $automatischeGesamtFlaeche > 0) {
+                // 📈 MODELL A: Hektar-Methode (Flächenproportional)
+                $anteil = intval($az->zugeordnete_flaeche_m2) / $automatischeGesamtFlaeche;
+                $neuerWert = $restBetrag * $anteil;
+            } else {
+                // 📊 MODELL C: Gleichverteilung (Pauschal durch Anzahl teilen)
+                $neuerWert = $restBetrag / $anzahlAuto;
+            }
+
+            // Wert centkonform runden und unzerbrechlich in der Kupplungstabelle aktualisieren
+            DB::table('parzelle_vertrag')
+                ->where('id', $az->id)
+                ->update([
+                    'zugeordneter_wert' => round($neuerWert, 2),
+                    'updated_at'        => now()
+                ]);
         }
     }
 

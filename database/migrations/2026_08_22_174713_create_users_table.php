@@ -5,25 +5,23 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
-    public function up(): void {
+    public function up(): void
+    {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->string('username')->unique()->index(); 
-            // 🚀 CORE-FIX: Aufteilung in Vorname und Nachname für die Helferverwaltung!
-            $table->string('vorname');
-            $table->string('nachname');
+            $table->unsignedBigInteger('betrieb_id')->nullable()->index()->comment('Zugehörigkeit zum Weinbaubetrieb');
+            $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
-            $table->enum('rolle', ['admin', 'mitarbeiter', 'helfer'])->default('helfer');
+            $table->json('erlaubte_gemarkungen')->nullable()->comment('Geografisches Scoping für Außenbetriebler (Array von Gemarkungen)');
             $table->rememberToken();
             $table->timestamps();
         });
     }
 
-
-
-    public function down(): void {
+    public function down(): void
+    {
         Schema::dropIfExists('users');
     }
 };

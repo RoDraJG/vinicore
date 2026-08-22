@@ -29,29 +29,17 @@ Route::middleware(['auth'])->group(function () {
         $betrieb = auth()->user()->aktuellerBetrieb;
         return view('schlaege.schlag_karte', compact('betrieb'));
     });
-    Route::get('/schlaege/schlag-karte', function () {
-        $betrieb = auth()->user()->aktuellerBetrieb;
-        return view('schlaege.schlag_karte', compact('betrieb'));
-    });
 
     // Dummy-Routen für deine ERP-Schnellzugriffsknöpfe
-    Route::get('/betrieb/daten', function () { 
-        return "🏢 Hier entstehen deine Betriebsdaten und Hof-Stammdaten."; 
-    });
-    
-    Route::get('/admin/dashboard', function () { 
-        return "⚙️ Hier entsteht dein administratives Winzer-Panel."; 
-    });
-    
-    Route::get('/user/profile', function () { 
-        return "👤 Hier entsteht dein persönliches Winzer-Profil."; 
-    });
+    Route::get('/betrieb/daten', function () { return "🏢 Hier entstehen deine Betriebsdaten und Hof-Stammdaten."; });
+    Route::get('/admin/dashboard', function () { return "⚙️ Hier entsteht dein administratives Winzer-Panel."; });
+    Route::get('/user/profile', function () { return "👤 Hier entsteht dein persönliches Winzer-Profil."; });
 
     // ==========================================================================
-    // 🛰️ INTEGRALE ASYNCHRONIE-SCHNITTSTELLEN (NATIV ÜBER DEINE WEB-SESSION ACCESSIBLE)
+    // 🛰️ INTEGRALE ASYNCHRONIE-SCHNITTSTELLEN (NATIV ÜBER WEB-SESSION)
     // ==========================================================================
     
-    // 🚀 ARCHITEKTUR-FIX ZEILE 47: Doppelpunkte durch korrekte Backslashes ersetzt!
+    // Speichert den reaktiven Kollaps-Status (w-0) live im Winzerprofil
     Route::post('/api/user/sidebar-status', function (\Illuminate\Http\Request $request) {
         session(['sidebar_collapsed' => (bool) $request->input('collapsed')]);
         return response()->json(['success' => true]);
@@ -60,24 +48,25 @@ Route::middleware(['auth'])->group(function () {
     // Zieht deine gebuchten Weinbergsparzellen als GeoJSON für Leaflet
     Route::get('/api/geojson/parzellen', [GisLiegenschaftenController::class, 'index']);
 
-
-
     // Lädt das hellblaue ALKIS-Umland-Vektornetz live vom Landesamt RLP
     Route::post('/api/kataster/umgebung-laden', [GisLiegenschaftenController::class, 'ladeUmgebungVomGeoportal']);
 
     // Startet die amtliche Flurstücks-Suche über das Gemarkungsmodal
     Route::post('/api/kataster/suchen-im-geoportal', [GisLiegenschaftenController::class, 'ladeVomGeoportalRlp']);
 
-    // Importiert die Neuflächen aus dem Sammelkorb fest als Betriebsbestand in deine 'parzellen'-Tabelle
+    // 📥 NEU: Speichert die gesammelten Warenkorb-Parzellen direkt zu einer vertrag_id
     Route::post('/api/kataster/parzellen/speichern-sammelkorb', [GisLiegenschaftenController::class, 'speichereInDatenbank']);
 
     // 📝 Schnittstellen für die historische Flurstücksverwaltung und das Zeitschloss
     Route::post('/api/kataster/parzellen/aktualisieren/{uuid}', [GisLiegenschaftenController::class, 'aktualisiereParzelle']);
     
-    // 🗑️ Die prozessuale Vernichtungs-Mündung für Version 1 & Zeitschloss ab Version 2
+    // 🗑️ Die prozessuale Vernichtungs-Mündung (NUR vor der Erstprüfung gültig!)
     Route::post('/api/kataster/parzellen/ausbuchen/{uuid}', [GisLiegenschaftenController::class, 'loescheParzelle']);
 
-    // 📡 Satelliten-Tunnel: Lädt die parzellenspezifischen Matrixdetails in Echtzeit in deine Sidebar
+    // 🤝 NEU: Die erweiterte Abgangs-Mündung (Verkauf / Pachtrückgabe mit Restpacht-Weichen)
+    Route::post('/api/kataster/parzellen/verkaufen/{uuid}', [GisLiegenschaftenController::class, 'verkaufeParzelle']);
+
+    // 📡 Satelliten-Tunnel: Lädt die parzellenspezifischen Matrixdetails in Echtzeit
     Route::get('/api/kataster/parzelle-details/{uuid}', [GisLiegenschaftenController::class, 'holeParzelleDetails']);
 
     // ==========================================================================
@@ -90,7 +79,7 @@ Route::middleware(['auth'])->group(function () {
     // 🔓 Entsperr-Mechanismus: Gibt das Flurstück sofort nach dem Schließen des Modals wieder frei
     Route::post('/api/kataster/parzellen/unlock/{uuid}', [GisLiegenschaftenController::class, 'unlockParzelle']);
 
-    // ⚖️ Admin-Mündung für das Vier-Augen-Prinzip: Gibt eine eingereichte Revision final für das Register frei
+    // ⚖️ Admin-Mündung für das Vier-Augen-Prinzip: Gibt eine eingereichte Revision final frei
     Route::post('/api/kataster/parzellen/freigeben/{uuid}', [GisLiegenschaftenController::class, 'freigebeParzelleAudit']);
 
 });

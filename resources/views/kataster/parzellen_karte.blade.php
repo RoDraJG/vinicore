@@ -16,7 +16,18 @@
             📊 Liegenschafts-Inspektor
         </h4>
     </div>
-    
+    <!-- 🛒 VINICORE VERTRAGS-STEUERUNG (ABSOLUT SICHER PLATZIERT) -->
+    @if(request()->has('vertrag_id'))
+    <div class="p-4 bg-emerald-50 border-b border-emerald-200 flex justify-between items-center font-sans text-xs w-full shadow-xs">
+        <div class="space-y-0.5">
+            <span class="inline-block bg-emerald-600 text-white font-mono uppercase text-[9px] tracking-wider px-2 py-0.5 rounded-md font-bold">● Vertrags-Modus aktiv</span>
+            <span class="text-slate-600 block sm:inline ml-2">Du sammelst aktuell Flächen für den Vertrag: <strong class="font-mono">#{{ request()->get('vertrag_id') }}</strong></span>
+        </div>
+        <button onclick="speichereVertragsWarenkorb()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold py-2 px-4 rounded-xl shadow-md transition uppercase tracking-wider text-[11px] cursor-pointer">
+            💾 Auswahl im Vertrag speichern
+        </button>
+    </div>
+    @endif
     <div id="globalInspektorBody" class="p-1 flex-1 overflow-y-auto space-y-2 bg-white">
         <div class="text-center py-36 text-slate-400 text-sm tracking-wide leading-relaxed font-sans font-medium">
             <div class="text-3xl mb-3 text-slate-300">🛰️</div>
@@ -88,6 +99,14 @@
 
     let gewaehlteFeaturesSammelkorb = [];    
     let gewaehlteBestandsParzellenKorb = []; 
+        // 🛰️ VINICORE CONTRACT-CART STORAGE
+    let vinicoreVertragsWarenkorb = []; // Puffert die angeklickten Geometrien im RAM
+    let vinicoreAktiveVertragId = null;  // Hält die ID des aktuell bearbeiteten Vertrags
+
+    // Liest die vertrag_id automatisch aus der URL (z.B. ?vertrag_id=45)
+    const urlParams = new URLSearchParams(window.location.search);
+    vinicoreAktiveVertragId = urlParams.get('vertrag_id') ? parseInt(urlParams.get('vertrag_id')) : null;
+
 
     document.addEventListener("DOMContentLoaded", function() {
         initVinicoreMap(); ladeGeoJsonKataster();
@@ -225,41 +244,55 @@
                     map.removeLayer(umgebungsWfsLayer);
                 }
 
-                umgebungsWfsLayer = L.geoJSON(data, {
-                    style: { fillColor: '#3b82f6', fillOpacity: 0.12, weight: 1.2, color: '#2563eb', dashArray: '3, 5' },
-                    onEachFeature: function(feature, layer) {
-                        
-                        // 🚀 NOON-REGULATOR: Verhindert die Doppel-Markierung fremder Flächen mit gleicher Nummer
-                        const schonImKorb = gewaehlteFeaturesSammelkorb.some(k => 
-                            k.properties.flurstueck === feature.properties.flurstueck && 
-                            parseInt(k.properties.flur) === parseInt(feature.properties.flur) &&
-                            k.properties.gemarkung.toLowerCase().trim() === feature.properties.gemarkung.toLowerCase().trim()
-                        );
-                        
-                        if (schonImKorb) {
-                            layer.setStyle({ fillColor: '#2563eb', fillOpacity: 0.5, weight: 2.5, color: '#2563eb', dashArray: null });
+            umgebungsWfsLayer = L.geoJSON(data, {
+                style: function(feature) {
+                    return {
+                        fillColor: '#38bdf8', // Transluzentes Hellblau (Standard)
+                        fillOpacity: 0.2,
+                        color: '#0284c7',
+                        weight: 1
+                    };
+                },
+                onEachFeature: function (feature, layer) {
+                    layer.on('click', function (e) {
+                        // 1. Wenn KEINE vertrag_id in der URL aktiv ist, verhält sich die Karte wie gewohnt (Info-Modus)
+                        if (!vinicoreAktiveVertragId) {
+                            oeffneGlobalenInspektorWidget(feature);
+                            return;
                         }
 
-                        layer.on('click', function(e) {
-                            L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e);
-                            
-                            const idx = gewaehlteFeaturesSammelkorb.findIndex(f => 
-                                f.properties.flurstueck === feature.properties.flurstueck &&
-                                parseInt(f.properties.flur) === parseInt(feature.properties.flur) &&
-                                f.properties.gemarkung.toLowerCase().trim() === feature.properties.gemarkung.toLowerCase().trim()
-                            );
-                            
-                            if (idx > -1) { 
-                                gewaehlteFeaturesSammelkorb.splice(idx, 1); 
-                                umgebungsWfsLayer.resetStyle(layer); 
-                            } else { 
-                                gewaehlteFeaturesSammelkorb.push(feature); 
-                                layer.setStyle({ fillColor: '#2563eb', fillOpacity: 0.5, weight: 2.5, color: '#2563eb', dashArray: null }); 
-                            }
-                            rendereSammlerInspektor();
+                        // 2. WARENKORB-MODUS AKTIV:
+                        const props = feature.properties;
+                        const flurstueckId = props.gemarkung + '-' + props.flur + '-' + props.flurstueck;
+                        
+                        const index = vinicoreVertragsWarenkorb.findIndex(item => {
+                            const p = item.properties;
+                            return (p.gemarkung + '-' + p.flur + '-' + p.flurstueck) === flurstueckId;
                         });
-                    }
-                }).addTo(map);
+
+                        if (index === -1) {
+                            // 🟡 Fläche war blau, wird in den Korb gelegt und leuchtet Gelb auf!
+                            vinicoreVertragsWarenkorb.push(feature);
+                            layer.setStyle({
+                                fillColor: '#eab308', // Signal-Gelb
+                                fillOpacity: 0.5,
+                                color: '#ca8a04',
+                                weight: 2
+                            });
+                        } else {
+                            // ↩️ Fläche war gelb, fliegt aus dem Korb und wird wieder Hellblau!
+                            vinicoreVertragsWarenkorb.splice(index, 1);
+                            layer.setStyle({
+                                fillColor: '#38bdf8', // Zurück auf Hellblau
+                                fillOpacity: 0.2,
+                                color: '#0284c7',
+                                weight: 1
+                            });
+                        }
+                    });
+                }
+            }).addTo(map);
+
 
             }
 
@@ -749,6 +782,62 @@
             } else {
                 alert('Kritischer Fehler in der Netzwerk-Leitung.');
             }
+        } finally {
+            if (spinner) spinner.classList.add('hidden');
+        }
+    }
+    /**
+     * 💾 VERTRAGS-WARENKORB PROZESS-FINALE
+     * Schießt alle gelben Parzellen transaktionsgesichert ins Backend! [1]
+     */
+    async function speichereVertragsWarenkorb() {
+        if (vinicoreVertragsWarenkorb.length === 0) {
+            alert("Fehler: Dein Warenkorb ist leer. Klicke zuerst auf blaue Umlandflächen, um sie gelb zu markieren!");
+            return;
+        }
+
+        if (!vinicoreAktiveVertragId) {
+            alert("Kritisch: Keine aktive Vertrags-ID im URL-Scope gefunden.");
+            return;
+        }
+
+        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const spinner = document.getElementById('vinicoreMapSpinner');
+        if (spinner) spinner.classList.remove('hidden');
+
+        try {
+            const response = await fetch('/api/kataster/parzellen/speichern-sammelkorb', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Accept': 'application/json', 
+                    'X-CSRF-TOKEN': token 
+                },
+                body: JSON.stringify({
+                    vertrag_id: vinicoreAktiveVertragId,
+                    parzellen: vinicoreVertragsWarenkorb
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                alert("Erfolg: " + data.message);
+                // Korb leeren und Karte tiefenreinigen
+                vinicoreVertragsWarenkorb = [];
+                // Lädt die Karte neu – die frisch importierten Flächen leuchten jetzt fest Grün auf!
+                await ladeGeoJsonKataster(true);
+                if (umgebungsWfsLayer) umgebungsWfsLayer.clearLayers();
+                await ladeUmliegendeWfsParzellen();
+                
+                // ↩️ Optional: Automatische Rückleitung zum Vertragsformular im Büro
+                // window.location.href = `/vinicore-vertraege/bearbeiten/${vinicoreAktiveVertragId}`;
+            } else {
+                alert("ERP-Sperre: " + (data.message || "Fehler beim Einbuchen des Warenkorbs."));
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Schnittstellen-Absturz: Der Korb konnte nicht verarbeitet werden.");
         } finally {
             if (spinner) spinner.classList.add('hidden');
         }
