@@ -121,10 +121,6 @@ function blockiereStammdatenFelder(status) {
 }
 
 
-/**
- * 🗺️ VERTRAGS-STAMMDATEN IN SESSION EINFRIEREN
- * Schiebt die Kopfdaten diebstahlsicher in die PHP-Sitzung und springt zur Karte!
- */
 function parkeVertragUndGeheZurKarte() {
     const num = document.getElementById('v_nummer').value.trim();
     if (!num) { alert("Bitte gib eine Vertrags- oder Urkundennummer ein!"); return; }
@@ -138,25 +134,57 @@ function parkeVertragUndGeheZurKarte() {
         gueltig_bis: document.getElementById('v_bis').value
     };
 
-    // 🚀 SERVER-SESSION-TRANSIT: Schreibt den Entwurf direkt in das Server-RAM
-    fetch('/api/kataster/vertrag/session-parken', {
+    // 🚀 INITIALISIERUNGS-FETCH: Holt eine frische Transaktions-UUID vom Server
+    fetch('/api/kataster/vertrag/entwurf-initialisieren', {
         method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json', 
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content') 
-        },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
         body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(res => {
         if (res.success) {
-            // Erst nach erfolgreicher Server-Sicherung wechseln wir zur Karte
-            window.location.href = '/kataster/parzellen-karte';
-        } else {
-            alert("Sitzungs-Fehler: " + res.message);
+            // Springt mit der echten UUID in der URL zur Landkarte
+            window.location.href = '/kataster/parzellen-karte?entwurf_id=' + res.entwurf_id;
         }
-    })
-    .catch(err => console.error("Session-API-Absturz:", err));
+    });
+}
+
+// Passe die Funktion feuereFinalenDatenbankCommit() an, um die ID mitzusenden:
+async function feuereFinalenDatenbankCommit(event) {
+    if (event) event.preventDefault();
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const entwurfId = urlParams.get('entwurf_id');
+    const pRaw = localStorage.getItem('vinicore_temporaere_parzellen');
+
+    if (!entwurfId) { alert("Fehler: Keine gültige Entwurfs-ID in der URL auffindbar."); return; }
+
+    const vertragObj = {
+        vertrag_nummer: document.getElementById('v_nummer').value.trim(),
+        typ: document.getElementById('v_typ').value,
+        vertragspartner_name: document.getElementById('v_partner').value.trim(),
+        gesamtwert: parseFloat(document.getElementById('v_wert').value || 0),
+        gueltig_von: document.getElementById('v_von').value,
+        gueltig_bis: document.getElementById('v_bis').value
+    };
+
+    try {
+        const response = await fetch('/api/kataster/vertrag/final-versiegeln', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
+            body: JSON.stringify({ 
+                entwurf_id: entwurfId,
+                vertrag: vertragObj 
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            alert("💥 " + data.message);
+            localStorage.removeItem('vinicore_temporaere_parzellen');
+            window.location.href = '/kataster/parzellen-karte'; 
+        }
+    } catch (e) { console.error(e); }
 }
 
     function geheZurueckZurKarte() {

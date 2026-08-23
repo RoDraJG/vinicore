@@ -90,6 +90,14 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/api/kataster/vertrag/session-parken', [\App\Http\Controllers\GisLiegenschaftenController::class, 'parkeStammdatenInSession']);
 
 
+
+    // 🛰️ VINICORE UUID-DRAFTING PIPELINE
+    Route::middleware(['web'])->group(function () {
+    Route::post('/api/kataster/vertrag/entwurf-initialisieren', [GisLiegenschaftenController::class, 'initialisiereEntwurf']);
+    Route::post('/api/kataster/vertrag/entwurf-parzellen-sync', [GisLiegenschaftenController::class, 'synchronisiereEntwurfsParzellen']);
+    Route::post('/api/kataster/vertrag/final-versiegeln', [GisLiegenschaftenController::class, 'finalVersiegeln']);
+});
+
 });
 
 // BREEZE INTEGRATION: Lädt die namensgesicherte auth.php unzerbrechlich hinzu!

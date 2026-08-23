@@ -397,30 +397,36 @@
             amtliche_flaeche_m2: parseInt(props.flaeche_m2 || props.amtliche_flaeche_m2 || 0)
         };
     }
-    /**
-     * 📜 VINICORE VERTRAGS-TRANSIT (REINE LOCALSTORAGE-SCHIENE)
-     * Sichert die Parzellen im puren GeoJSON-Format und schützt die
-     * eingefrorenen Stammdaten unbestechlich vor dem Überschreiben!
-     */
-    function ZündeVertragsWeiterleitung() {
-        // 1. Sicherheits-Check: Nur springen, wenn auch Flächen im Korb liegen
-        if (!gewaehlteFeaturesSammelkorb || gewaehlteFeaturesSammelkorb.length === 0) {
-            alert("Bitte wähle zuerst mindestens eine Fläche auf der Karte aus!");
-            return;
-        }
+// Suche deine Funktion ZündeVertragsWeiterleitung() ganz unten im Script:
+function ZündeVertragsWeiterleitung() {
+    if (!gewaehlteFeaturesSammelkorb || gewaehlteFeaturesSammelkorb.length === 0) return;
 
-        // 2. 🚀 THE PURITY-FIX: Schiebt die echten GeoJSON-Features 1:1 in den Speicher,
-        // ohne sie flachzuklopfen oder die m² abzuschneiden!
+    const urlParams = new URLSearchParams(window.location.search);
+    const entwurfId = urlParams.get('entwurf_id');
+
+    if (!entwurfId) {
+        // Fallback für freies Browsen: Erstellt normale Neuanlage
         localStorage.setItem('vinicore_temporaere_parzellen', JSON.stringify(gewaehlteFeaturesSammelkorb));
-
-        // 3. 🛡️ DATA-SHIELD: Wir rufen 'vinicore_temp_vertrag_stammdaten' hier bewusst NICHT auf
-        // und löschen es nicht, damit die Eingaben im Formular unberührt erhalten bleiben.
-
-        // 4. Sprung zurück zur Neuanlage-Maske
-        setTimeout(() => {
-            window.location.href = '/finanzen/vertrag-anlegen';
-        }, 50);
+        window.location.href = '/finanzen/vertrag-anlegen';
+        return;
     }
+
+    // 🚀 LIVE-DATABASE-SYNC: Lädt den Korb direkt unter der UUID in MySQL hoch!
+    fetch('/api/kataster/vertrag/entwurf-parzellen-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
+        body: JSON.stringify({ entwurf_id: entwurfId, parzellen: gewaehlteFeaturesSammelkorb })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            localStorage.setItem('vinicore_temporaere_parzellen', JSON.stringify(gewaehlteFeaturesSammelkorb));
+            // Springt mitsamt der UUID im Gepäck zurück zur Formular-Mündung
+            window.location.href = '/finanzen/vertrag-anlegen?entwurf_id=' + entwurfId;
+        }
+    });
+}
+
 
     /**
      * 🛰️ KORB-NAVIGATOR ("Gehe zu"-Funktion für blaue Umlandparzellen)

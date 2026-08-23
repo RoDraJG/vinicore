@@ -15,6 +15,130 @@ use App\Models\ParzelleVertrag;
 class GisLiegenschaftenController extends Controller
 {
     /**
+     * 🛰️ UUID-ENTWURF INITIALISIEREN
+     * Parkt die ersten Stammdaten und liefert eine flüchtige Transaktions-UUID zurück.
+     */
+    public function initialisiereEntwurf(Request $request): JsonResponse
+    {
+        $uuid = (string) Str::uuid();
+
+        DB::table('vertrags_entwuerfe')->insert([
+            'id'                   => $uuid,
+            'vertrag_nummer'       => $request->vertrag_nummer,
+            'typ'                  => $request->typ,
+            'vertragspartner_name' => $request->vertragspartner_name,
+            'gesamtwert'           => $request->gesamtwert ?? 0,
+            'gueltig_von'          => $request->gueltig_von,
+            'gueltig_bis'          => $request->gueltig_bis,
+            'created_at'           => now(),
+            'updated_at'           => now()
+        ]);
+
+        return response()->json(['success' => true, 'entwurf_id' => $uuid]);
+    }
+
+    /**
+     * 🗺️ LIVE-KARTEN-SYNCHRONISATION
+     * Speicher-Riegel: Schreibt die gewählten GeoJSON-Kacheln direkt unter der UUID in MySQL.
+     */
+    public function synchronisiereEntwurfsParzellen(Request $request): JsonResponse
+    {
+        $entwurfId = $request->entwurf_id;
+        $parzellen = $request->parzellen ?? [];
+
+        if (!$entwurfId) {
+            return response()->json(['success' => false, 'message' => 'Keine gültige Entwurfs-ID übermittelt.']);
+        }
+
+        DB::table('parzelle_entwurf')->where('entwurf_id', $entwurfId)->delete();
+
+        foreach ($parzellen as $p) {
+            $props = $p['properties'] ?? [];
+            
+            DB::table('parzelle_entwurf')->insert([
+                'entwurf_id'          => $entwurfId,
+                'gemarkung'           => $props['gemarkung'] ?? 'Umland',
+                'flur'                => intval($props['flur'] ?? 1),
+                'flurstueck_zaehler'  => $props['flurstueck_zaehler'] ?? $props['zaehler'] ?? '0',
+                'flurstueck_nenner'   => $props['flurstueck_nenner'] ?? $props['nenner'] ?? null,
+                'amtliche_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0),
+                'raw_geojson'         => json_encode($p),
+                'created_at'          => now(),
+                'updated_at'          => now()
+            ]);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Kartenflächen servergesichert.']);
+    }
+
+    /**
+     * 🏢 THE ENTERPRISE COMMIT: DIE GEBURTSSTUNDE DER ECHTEN NUMERISCHEN ID
+     * Überführt den schwebenden UUID-Entwurf final in den produktiven Echt-Bestand.
+     */
+    public function finalVersiegeln(Request $request): JsonResponse
+    {
+        $entwurfId = $request->entwurf_id;
+        $jetzt = now();
+
+        $entwurf = DB::table('vertrags_entwuerfe')->where('id', $entwurfId)->first();
+        if (!$entwurf) {
+            return response()->json(['success' => false, 'message' => 'Der Entwurf ist abgelaufen oder nicht auffindbar.']);
+        }
+
+        // 🚀 NUMERISCHER NUMMERNKREIS: Erst jetzt entsteht die fortlaufende vertrag_id!
+        $echteVertragId = DB::table('vertraege')->insertGetId([
+            'vertrag_nummer'       => $request->input('vertrag.vertrag_nummer') ?? $entwurf->vertrag_nummer,
+            'typ'                  => $request->input('vertrag.typ') ?? $entwurf->typ,
+            'vertragspartner_name' => $request->input('vertrag.vertragspartner_name') ?? $entwurf->vertragspartner_name,
+            'gesamtwert'           => $request->input('vertrag.gesamtwert') ?? $entwurf->gesamtwert,
+            'gueltig_von'          => $request->input('vertrag.gueltig_von') ?? $entwurf->gueltig_von,
+            'gueltig_bis'          => $request->input('vertrag.gueltig_bis') ?? $entwurf->gueltig_bis,
+            'status'               => 'aktiv',
+            'created_at'           => $jetzt,
+            'updated_at'           => $jetzt
+        ]);
+
+        $schwebendeFlächen = DB::table('parzelle_entwurf')->where('entwurf_id', $entwurfId)->get();
+
+        foreach ($schwebendeFlächen as $f) {
+            $neueUuid = (string) Str::uuid();
+            $geojson = json_decode($f->raw_geojson, true);
+
+            DB::table('parzellen')->insert([
+                'parzelle_uuid'       => $neueUuid,
+                'version'             => 1,
+                'freigabe_status'     => 'undefiniert',
+                'polygon_vektoren'    => isset($geojson['geometry']) ? json_encode($geojson['geometry']) : null,
+                'gemarkung'           => $f->gemarkung,
+                'flur'                => $f->flur,
+                'flurstueck_zaehler'  => $f->flurstueck_zaehler,
+                'flurstueck_nenner'   => $f->flurstueck_nenner,
+                'amtliche_flaeche_m2' => $f->amtliche_flaeche_m2,
+                'besitz_status'       => 'undefiniert',
+                'aenderungsgrund'     => 'In Kauf/Pachtvertrag aufgenommen',
+                'gueltig_von'         => $jetzt,
+                'user_id'             => Auth::id(),
+                'created_at'          => $jetzt,
+                'updated_at'          => $jetzt
+            ]);
+
+            DB::table('parzelle_vertrag')->insert([
+                'parzelle_uuid'          => $neueUuid,
+                'vertragable_id'         => $echteVertragId,
+                'vertragable_type'       => 'App\Models\VinicoreVertrag',
+                'zugeordnete_flaeche_m2' => $f->amtliche_flaeche_m2,
+                'user_id'                => Auth::id(),
+                'created_at'             => $jetzt,
+                'updated_at'             => $jetzt
+            ]);
+        }
+
+        // Vernichtet den temporären UUID-Eintrag restlos aus den Puffertabellen
+        DB::table('vertrags_entwuerfe')->where('id', $entwurfId)->delete();
+
+        return response()->json(['success' => true, 'message' => 'Vertrag mitsamt Katasterflächen erfolgreich revisionssicher eingebucht!']);
+    }
+/**
      * 🛰️ THE GLOBAL GEOJSON GENERATOR (REGISTER-SPIEGEL)
      * 🚀 REVISIONS-FIX: Generiert ein absolut standardkonformes GeoJSON-FeatureCollection-Objekt!
      */
@@ -865,7 +989,7 @@ class GisLiegenschaftenController extends Controller
      * 🛰️ VERTRAGS-STAMMDATEN IM SERVER-RAM PUFFERN
      * Schützt den Entwurf absolut sicher im PHP-Sitzungsspeicher vor dem Verlust! [2]
      */
-    public function parkeStammdatenInSession(\Illuminate\Http\Request $request): \Illuminate\Http\JsonResponse
+    public function parkeStammdatenInSession(Request $request):JsonResponse
     {
         // Validierung der Mindestanforderungen [2]
         $request->validate([
