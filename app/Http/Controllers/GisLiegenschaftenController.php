@@ -193,6 +193,7 @@ class GisLiegenschaftenController extends Controller
             $neueParzellenUuids = [];
 
             foreach ($importierteParzellen as $einzelneParzelle) {
+                // 🪐 BACK TO THE ROOTS: Nutzt wieder zu 100% deinen originalen, funktionierenden GeoJSON-Parser!
                 $props = $einzelneParzelle['properties'] ?? []; 
                 $geometry = $einzelneParzelle['geometry'] ?? null;
                 
@@ -200,11 +201,21 @@ class GisLiegenschaftenController extends Controller
                 $flur = !empty($props['flur']) ? intval(preg_replace('/[^\d]/', '', $props['flur'])) : 1;
                 
                 $flurstueckRaw = trim($props['flurstueck'] ?? ''); 
+                $amtlicheFlaeche = intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0);
+                $flurnameLage = trim($props['flurname_lage'] ?? 'Flur ' . $flur . ' | Nr. ' . $flurstueckRaw);
+                $gemeinde = trim($props['gemeinde'] ?? 'Weinbaugemeinde');
+                $gemarkungsschluessel = trim($props['gemarkungsschuelser'] ?? $props['gemaschl'] ?? null);
+
+                // 🧱 AB HIER LÄUFT DEIN ORIGINALER SPEICHER-PROZESS UNBERÜHRT WEIDER:
+                $teile = explode('/', $flurstueckRaw);
+
+
+                // 🧱 AB HIER NUTZT DIE STRUKTUR DEINE BEREINIGTEN VARIABLEN UNZERSTÖRBAR WEITER:
                 $teile = explode('/', $flurstueckRaw);
                 $zaehler = preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $teile[0] ?? $flurstueckRaw));
                 $nenner = (count($teile) > 1 && trim($teile[1]) !== '0' && trim($teile[1]) !== '') ? preg_replace('/^[0\s]+/', '', preg_replace('/[^\d]/', '', $teile[1])) : null;
 
-                // 🛡️ REVISIONSSCHUTZ: Prüfen, ob genau dieses Flurstück bereits AKTIV im Betrieb steht
+                // REVISIONSSCHUTZ: Prüfen, ob genau dieses Flurstück bereits AKTIV im Betrieb steht
                 $existiertBereits = DB::table('parzellen')
                     ->where('gemarkung', '=', $gemarkung)
                     ->where('flur', $flur)
@@ -217,26 +228,26 @@ class GisLiegenschaftenController extends Controller
                     ->exists();
 
                 if ($existiertBereits) {
-                    continue; // Überspringen, da die Fläche bereits im echten Betriebsspiegel aktiv ist!
+                    continue; 
                 }
 
                 $neueUuid = (string) Str::uuid();
 
-                // 🧱 1. Flurstück im Zustand UNDEFINIERT (Version 1) in die parzellen-Tabelle stanzen
+                // Flurstück im Zustand UNDEFINIERT (Version 1) in die parzellen-Tabelle stanzen
                 DB::table('parzellen')->insert([
                     'parzelle_uuid'       => $neueUuid,
                     'version'             => 1,
-                    'freigabe_status'     => 'undefiniert', // 🟡 Erscheint reaktiv Gelb auf der Karte!
+                    'freigabe_status'     => 'undefiniert',
                     'polygon_vektoren'    => $geometry ? json_encode($geometry) : null,
-                    'gemeinde'            => trim($props['gemeinde'] ?? 'Weinbaugemeinde'),
+                    'gemeinde'            => $gemeinde,
                     'gemarkung'           => $gemarkung,
-                    'gemarkungsschuelser' => trim($props['gemarkungsschuelser'] ?? $props['gemaschl'] ?? null),
+                    'gemarkungsschuelser' => $gemarkungsschluessel,
                     'flur'                => $flur,
                     'flurstueck_zaehler'  => $zaehler,
                     'flurstueck_nenner'   => $nenner,
-                    'flurname_lage'       => trim($props['flurname_lage'] ?? 'Flur ' . $flur . ' | Nr. ' . $flurstueckRaw),
-                    'amtliche_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0),
-                    'besitz_status'       => 'undefiniert', // Wirtschaftlich noch völlig neutral
+                    'flurname_lage'       => $flurnameLage,
+                    'amtliche_flaeche_m2' => $amtlicheFlaeche,
+                    'besitz_status'       => 'undefiniert',
                     'aenderungsgrund'     => 'In den Pacht/Kaufvertrags-Warenkorb aufgenommen',
                     'gueltig_von'         => $jetzt,
                     'gueltig_bis'         => null,
@@ -245,13 +256,14 @@ class GisLiegenschaftenController extends Controller
                     'updated_at'          => $jetzt
                 ]);
 
-                // 🧱 2. Die polymorthe Beziehung in parzelle_vertrag einhängen
+                // Die polymorphe Beziehung in parzelle_vertrag einhängen
                 DB::table('parzelle_vertrag')->insert([
                     'parzelle_uuid'          => $neueUuid,
                     'vertragable_id'         => $vertragId,
-                    'vertragable_type'       => \App\Models\VinicoreVertrag::class, // Morph-Kopplung
-                    'zugeordneter_wert'      => 0.00, // Wird gleich im Anschluss berechnet!
-                    'zugeordnete_flaeche_m2' => intval($props['amtliche_flaeche_m2'] ?? $props['flaeche_m2'] ?? 0),
+                    'vertragable_type'       => \App\Models\VinicoreVertrag::class,
+                    'zugeordneter_wert'      => 0.00,
+                    'zugeordneter_wert'      => 0.00,
+                    'zugeordnete_flaeche_m2' => $amtlicheFlaeche,
                     'user_id'                => Auth::id(),
                     'created_at'             => $jetzt,
                     'updated_at'             => $jetzt
@@ -259,6 +271,7 @@ class GisLiegenschaftenController extends Controller
 
                 $neueParzellenUuids[] = $neueUuid;
             }
+
 
             // 📊 3. AUTOMATISCHE KASKADEN-ALLOKATION AUSFÜHREN (Modell A oder C)
             if (!empty($neueParzellenUuids)) {
@@ -354,7 +367,7 @@ class GisLiegenschaftenController extends Controller
             $bereinigteBbox = str_replace(' ', '', $request->bbox);
 
             $targetUrl = $baseUrl . "SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ave:Flurstueck"
-                       . "&STARTINDEX=0&COUNT=2500&SRSNAME=urn:ogc:def:crs:EPSG::3857" 
+                       . "&STARTINDEX=0&COUNT=5000&SRSNAME=urn:ogc:def:crs:EPSG::3857" 
                        . "&BBOX=" . rawurlencode($bereinigteBbox);
 
             $ch = curl_init($targetUrl);
@@ -847,6 +860,28 @@ class GisLiegenschaftenController extends Controller
             DB::rollBack();
             return response()->json(['success' => false, 'message' => 'Lösch-Kernel fehlgeschlagen: ' . $e->getMessage()], 500);
         }
+    }
+    /**
+     * 🛰️ VERTRAGS-STAMMDATEN IM SERVER-RAM PUFFERN
+     * Schützt den Entwurf absolut sicher im PHP-Sitzungsspeicher vor dem Verlust! [2]
+     */
+    public function parkeStammdatenInSession(\Illuminate\Http\Request $request): \Illuminate\Http\JsonResponse
+    {
+        // Validierung der Mindestanforderungen [2]
+        $request->validate([
+            'vertrag_nummer' => 'required',
+            'typ'            => 'required'
+        ]);
+
+        // Schreibt die Formulardaten sicher in die servereigene PHP-Session [2]
+        session(['vinicore_schwebe_vertrag' => $request->only([
+            'vertrag_nummer', 'typ', 'vertragspartner_name', 'gesamtwert', 'gueltig_von', 'gueltig_bis'
+        ])]);
+
+        return response()->json([
+            'success' => true, 
+            'message' => 'Stammdaten im Server-Sitzungsspeicher fixiert.'
+        ]);
     }
 
 }

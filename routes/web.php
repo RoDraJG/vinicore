@@ -87,6 +87,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/finanzen/vertrag-speichern', [\App\Http\Controllers\VertragController::class, 'speichereVertrag'])->name('vertrag.speichern');
     Route::post('/api/kataster/vertrag/final-versiegeln', [\App\Http\Controllers\VertragController::class, 'finaleVersiegeln']);
 
+    Route::post('/api/kataster/vertrag/session-parken', [\App\Http\Controllers\GisLiegenschaftenController::class, 'parkeStammdatenInSession']);
 
 
 });
