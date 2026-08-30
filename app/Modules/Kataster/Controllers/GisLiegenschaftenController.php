@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Modules\Kataster\Controllers;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,12 @@ class GisLiegenschaftenController extends Controller
      * 🛰️ UUID-ENTWURF INITIALISIEREN
      * Parkt die ersten Stammdaten und liefert eine flüchtige Transaktions-UUID zurück.
      */
+
+        public function index()
+    {
+        // Lädt die parzellen_karte.blade.php aus resources/views/kataster/
+        return view('kataster.parzellen_karte'); 
+    }
     public function initialisiereEntwurf(Request $request): JsonResponse
     {
         $uuid = (string) Str::uuid();
@@ -142,64 +149,47 @@ class GisLiegenschaftenController extends Controller
      * 🛰️ THE GLOBAL GEOJSON GENERATOR (REGISTER-SPIEGEL)
      * 🚀 REVISIONS-FIX: Generiert ein absolut standardkonformes GeoJSON-FeatureCollection-Objekt!
      */
-    public function index(Request $request): JsonResponse
-    {
-        try {
-            // 🚀 CORE-FIX: Lädt sowohl die vorläufigen (undefiniert) als auch die aktiven Flächen!
-            $parzellen = DB::table('parzellen')
-                ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
-                ->whereNull('gueltig_bis')
-                ->get();
+public function holeGespeicherteParzellenAusDatenbank(Request $request): JsonResponse
+{
+    $parzellen = DB::table('parzellen')
+        ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
+        ->whereNull('gueltig_bis')
+        ->get();
 
+    $geoJson = [
+        'type' => 'FeatureCollection',
+        'features' => []
+    ];
 
-            // Erschafft das saubere, von Leaflet geforderte GeoJSON-Skelett-Fundament [source: 1.1.1]
-            $geoJson = [
-                'type' => 'FeatureCollection',
-                'features' => []
+    foreach ($parzellen as $p) {
+        if (empty($p->polygon_vektoren)) continue;
+        
+        $geometry = json_decode($p->polygon_vektoren, true);
+        if ($geometry) {
+            $geoJson['features'][] = [
+                'type' => 'Feature',
+                'geometry' => $geometry,
+                'properties' => [
+                    'id' => $p->id,
+                    'parzelle_uuid' => $p->parzelle_uuid,
+                    'gemarkung' => $p->gemarkung,
+                    'flur' => $p->flur,
+                    'flurstueck' => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
+                    'amtliche_flaeche_m2' => $p->amtliche_flaeche_m2,
+                    'nutzungs_art' => $p->nutzungs_art ?? '',
+                    'boden_schaetz_wert' => $p->boden_schaetz_wert ?? '',
+                    'rebsorte' => $p->rebsorte ?? '',
+                    'vortrag_pacht' => $p->vortrag_pacht ?? '',
+                    'freigabe_status' => $p->freigabe_status,
+                    'besitz_status' => $p->besitz_status ?? 'eigentum'
+                ]
             ];
-
-            foreach ($parzellen as $p) {
-                // Falls aus irgendeinem Grund kein Vektor vorhanden ist, überspringen wir die Fläche datensicher
-                if (empty($p->polygon_vektoren)) {
-                    continue;
-                }
-
-                // Dekodiert den unzerstörbaren JSON-String der Geometrie aus deiner MySQL-Zelle
-                $geometry = json_decode($p->polygon_vektoren, true);
-
-                if ($geometry) {
-                    $geoJson['features'][] = [
-                        'type' => 'Feature',
-                        'geometry' => $geometry,
-                        // Übergibt alle ERP-Eigenschaften reaktiv für das Leaflet-Klick-Event
-                        'properties' => [
-                            'id'                  => $p->id,
-                            'parzelle_uuid'       => $p->parzelle_uuid,
-                            'version'             => $p->version,
-                            'gemarkung'           => $p->gemarkung,
-                            'flur'                => $p->flur,
-                            'flurstueck'          => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
-                            'flurstueck_zaehler'  => $p->flurstueck_zaehler,
-                            'flurstueck_nenner'   => $p->flurstueck_nenner,
-                            'flurname_lage'       => $p->flurname_lage,
-                            'amtliche_flaeche_m2' => $p->amtliche_flaeche_m2,
-                            'besitz_status'       => $p->besitz_status
-                        ]
-                    ];
-                }
-            }
-
-            return response()->json($geoJson);
-
-        } catch (\Exception $e) {
-            // Fängt jeden Fehler ab und verhindert, dass HTML-Müll an den Leaflet-Parser geschickt wird!
-            return response()->json([
-                'type' => 'FeatureCollection',
-                'features' => [],
-                'error' => 'GeoJSON-Kernel blockiert: ' . $e->getMessage()
-            ], 500);
         }
     }
+
+    return response()->json($geoJson);
+}
+
 
     /**
      * Zieht ein amtliches Flurstück LIVE über den ALKIS 2.0 WFS-Endpunkt.
@@ -491,7 +481,7 @@ class GisLiegenschaftenController extends Controller
             $bereinigteBbox = str_replace(' ', '', $request->bbox);
 
             $targetUrl = $baseUrl . "SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ave:Flurstueck"
-                       . "&STARTINDEX=0&COUNT=5000&SRSNAME=urn:ogc:def:crs:EPSG::3857" 
+                       . "&STARTINDEX=0&COUNT=10000&SRSNAME=urn:ogc:def:crs:EPSG::3857" 
                        . "&BBOX=" . rawurlencode($bereinigteBbox);
 
             $ch = curl_init($targetUrl);

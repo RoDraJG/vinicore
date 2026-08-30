@@ -61,8 +61,8 @@
      ========================================================================== -->
 <script>
     if (typeof window.ZOOM_MAX_LIMIT === 'undefined') { window.ZOOM_MAX_LIMIT = 21; }
-    if (typeof window.ZOOM_WMS_START === 'undefined') { window.ZOOM_WMS_START = 15; }
-    if (typeof window.ZOOM_WFS_START === 'undefined') { window.ZOOM_WFS_START = 16; }
+    if (typeof window.ZOOM_WMS_START === 'undefined') { window.ZOOM_WMS_START = 10; }
+    if (typeof window.ZOOM_WFS_START === 'undefined') { window.ZOOM_WFS_START = 15; }
     
     var ZOOM_MAX_LIMIT = window.ZOOM_MAX_LIMIT;
     var ZOOM_WMS_START = window.ZOOM_WMS_START;
