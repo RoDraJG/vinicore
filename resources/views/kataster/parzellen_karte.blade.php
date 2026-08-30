@@ -215,23 +215,7 @@
     }
     async function ladeGeoJsonKataster(deaktiviereGlobalenZoom = false) {
         try {
-            const response = await // VORHER IN ZEILE 430: fetch('/api/geojson/parzellen')
-// 🚀 JETZT NEU UND UNZERSTÖRBAR:
-fetch('{{ route("kataster.parzellen.laden") }}')
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Netzwerk-Antwort war nicht ok');
-        }
-        return response.json();
-    })
-    .then(geoJson => {
-        // Hier läuft dein bestehender Code (L.geoJSON...) absolut fehlerfrei weiter!
-        L.geoJSON(geoJson, {
-            // deine karten-logik...
-        }).addTo(map);
-    })
-    .catch(error => console.error('Fehler beim Laden der Parzellen:', error));
-
+            const response = await fetch('/api/geojson/parzellen');
             const data = await response.json();
             if (geojsonLayer) map.removeLayer(geojsonLayer);
 
@@ -295,7 +279,7 @@ fetch('{{ route("kataster.parzellen.laden") }}')
         const bboxString = [swX.toFixed(5), swY.toFixed(5), neX.toFixed(5), neY.toFixed(5), 'urn:ogc:def:crs:EPSG::3857'].join(',');
         
         try {
-            const response = await fetch('/kataster/umgebung-laden', { 
+            const response = await fetch('/api/kataster/umgebung-laden', { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content') }, 
                 body: JSON.stringify({ bbox: bboxString }), 

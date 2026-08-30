@@ -32,9 +32,13 @@ class LoginController extends Controller
      *
      * @return void
      */
-    public function __construct()
+    /**
+     * 🚀 VINICORE USERNAME-GATEWAY
+     * Überschreibt den Standard-Login-Pfad von E-Mail auf Benutzernamen! [source: 1.3.2]
+     */
+    public function username()
     {
-        $this->middleware('guest')->except('logout');
-        $this->middleware('auth')->only('logout');
+        return 'username'; // 👈 Sagt Laravel, dass die Spalte 'username' der Login-Anker ist! [source: 1.3.2, 1.3.3]
     }
+
 }

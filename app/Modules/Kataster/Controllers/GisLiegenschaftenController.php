@@ -16,15 +16,22 @@ use App\Models\ParzelleVertrag;
 class GisLiegenschaftenController extends Controller
 {
     /**
-     * 🛰️ UUID-ENTWURF INITIALISIEREN
-     * Parkt die ersten Stammdaten und liefert eine flüchtige Transaktions-UUID zurück.
+     * 🗺️ HTML-ANSICHT: DIE LANDKARTE
+     * Lädt das Kartenskelett mitsamt den dynamischen Admin-Farben aus der Datenbank!
      */
-
-        public function index()
+    public function index()
     {
-        // Lädt die parzellen_karte.blade.php aus resources/views/kataster/
-        return view('kataster.parzellen_karte'); 
+        // Holt die flexiblen HEX-Farben reaktiv aus dem neuen System-Einstellungs-Pool
+        $farben = [
+            'eigentum'   => \Illuminate\Support\Facades\DB::table('system_einstellungen')->where('schluessel', 'farbe_eigentum')->value('wert') ?? '#059669',
+            'gepachtet'  => \Illuminate\Support\Facades\DB::table('system_einstellungen')->where('schluessel', 'farbe_gepachtet')->value('wert') ?? '#2563eb',
+            'verpachtet' => \Illuminate\Support\Facades\DB::table('system_einstellungen')->where('schluessel', 'farbe_verpachtet')->value('wert') ?? '#64748b',
+        ];
+
+        // Schickt die Farb-Matrix unzerstörbar mit zur Blade-View
+        return view('kataster.parzellen_karte', compact('farben')); 
     }
+
     public function initialisiereEntwurf(Request $request): JsonResponse
     {
         $uuid = (string) Str::uuid();
@@ -145,51 +152,71 @@ class GisLiegenschaftenController extends Controller
 
         return response()->json(['success' => true, 'message' => 'Vertrag mitsamt Katasterflächen erfolgreich revisionssicher eingebucht!']);
     }
-/**
-     * 🛰️ THE GLOBAL GEOJSON GENERATOR (REGISTER-SPIEGEL)
-     * 🚀 REVISIONS-FIX: Generiert ein absolut standardkonformes GeoJSON-FeatureCollection-Objekt!
+    /**
+     * 🛰️ API-ENDPUNKT: GEOMETRIEN FÜR DIE LEAFLET-OVERLAYS
+     * Lädt alle im Sammelkorb gespeicherten Parzellen als sauberes GeoJSON!
      */
-public function holeGespeicherteParzellenAusDatenbank(Request $request): JsonResponse
-{
-    $parzellen = DB::table('parzellen')
-        ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
-        ->whereNull('gueltig_bis')
-        ->get();
+    public function holeGespeicherteParzellenAusDatenbank(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            // Holt alle aktiven Parzellen aus der Datenbank
+            $parzellen = \Illuminate\Support\Facades\DB::table('parzellen')
+                ->whereIn('freigabe_status', ['undefiniert', 'aktiv'])
+                ->whereNull('gueltig_bis')
+                ->get();
 
-    $geoJson = [
-        'type' => 'FeatureCollection',
-        'features' => []
-    ];
-
-    foreach ($parzellen as $p) {
-        if (empty($p->polygon_vektoren)) continue;
-        
-        $geometry = json_decode($p->polygon_vektoren, true);
-        if ($geometry) {
-            $geoJson['features'][] = [
-                'type' => 'Feature',
-                'geometry' => $geometry,
-                'properties' => [
-                    'id' => $p->id,
-                    'parzelle_uuid' => $p->parzelle_uuid,
-                    'gemarkung' => $p->gemarkung,
-                    'flur' => $p->flur,
-                    'flurstueck' => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
-                    'amtliche_flaeche_m2' => $p->amtliche_flaeche_m2,
-                    'nutzungs_art' => $p->nutzungs_art ?? '',
-                    'boden_schaetz_wert' => $p->boden_schaetz_wert ?? '',
-                    'rebsorte' => $p->rebsorte ?? '',
-                    'vortrag_pacht' => $p->vortrag_pacht ?? '',
-                    'freigabe_status' => $p->freigabe_status,
-                    'besitz_status' => $p->besitz_status ?? 'eigentum'
-                ]
+            // Baut das standardkonforme GeoJSON-Skelett
+            $geoJson = [
+                'type' => 'FeatureCollection',
+                'features' => []
             ];
+
+            foreach ($parzellen as $p) {
+                // Wenn kein Vektor hinterlegt ist, überspringen
+                if (empty($p->polygon_vektoren)) {
+                    continue;
+                }
+
+                // Dekodiert die Geometrie aus der MySQL-Zelle
+                $geometry = is_string($p->polygon_vektoren) 
+                    ? json_decode($p->polygon_vektoren, true) 
+                    : $p->polygon_vektoren;
+
+                if ($geometry) {
+                    $geoJson['features'][] = [
+                        'type' => 'Feature',
+                        'geometry' => $geometry,
+                        'properties' => [
+                            'id' => $p->id,
+                            'parzelle_uuid' => $p->parzelle_uuid ?? '',
+                            'gemarkung' => $p->gemarkung ?? '',
+                            'flur' => $p->flur ?? '',
+                            'flurstueck' => $p->flurstueck_zaehler . ($p->flurstueck_nenner ? '/' . $p->flurstueck_nenner : ''),
+                            'flurstueck_zaehler' => $p->flurstueck_zaehler ?? '',
+                            'flurstueck_nenner' => $p->flurstueck_nenner ?? '',
+                            'amtliche_flaeche_m2' => $p->amtliche_flaeche_m2 ?? 0,
+                            'nutzungs_art' => $p->nutzungs_art ?? '',
+                            'boden_schaetz_wert' => $p->boden_schaetz_wert ?? '',
+                            'rebsorte' => $p->rebsorte ?? '',
+                            'vortrag_pacht' => $p->vortrag_pacht ?? '',
+                            'freigabe_status' => $p->freigabe_status,
+                            'besitz_status' => $p->besitz_status ?? 'eigentum'
+                        ]
+                    ];
+                }
+            }
+
+            return response()->json($geoJson);
+
+        } catch (\Exception $e) {
+            // Fängt Fehler ab und schickt ein gültiges, leeres GeoJSON zurück
+            return response()->json([
+                'type' => 'FeatureCollection',
+                'features' => [],
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
-
-    return response()->json($geoJson);
-}
-
 
     /**
      * Zieht ein amtliches Flurstück LIVE über den ALKIS 2.0 WFS-Endpunkt.
@@ -996,6 +1023,45 @@ public function holeGespeicherteParzellenAusDatenbank(Request $request): JsonRes
             'success' => true, 
             'message' => 'Stammdaten im Server-Sitzungsspeicher fixiert.'
         ]);
+    }
+    /**
+     * ⚙️ ZEIGT DIE SYSTEM-EINSTELLUNGEN
+     * Lädt alle aktuellen Farbwerte aus der Datenbank für das Formular.
+     */
+    public function einstellungenIndex()
+    {
+        $einstellungen = \Illuminate\Support\Facades\DB::table('system_einstellungen')
+            ->pluck('wert', 'schluessel');
+
+        return view('core.einstellungen', compact('einstellungen'));
+    }
+
+    /**
+     * 💾 SPEICHERT DIE NEUEN FARBEN
+     * Validiert die HEX-Werte und brennt sie unzerstörbar in die Datenbank ein.
+     */
+    public function einstellungenSpeichern(\Illuminate\Http\Request $request)
+    {
+        // Validiert, dass nur echte Hex-Farbcodes übermittelt werden
+        $request->validate([
+            'farbe_eigentum'   => 'required|regex:/^#[a-fA-F0-9]{6}$/',
+            'farbe_gepachtet'  => 'required|regex:/^#[a-fA-F0-9]{6}$/',
+            'farbe_verpachtet' => 'required|regex:/^#[a-fA-F0-9]{6}$/',
+        ]);
+
+        $farben = ['farbe_eigentum', 'farbe_gepachtet', 'farbe_verpachtet'];
+
+        foreach ($farben as $schluessel) {
+            \Illuminate\Support\Facades\DB::table('system_einstellungen')
+                ->where('schluessel', $schluessel)
+                ->update([
+                    'wert' => $request->input($schluessel),
+                    'updated_at' => now()
+                ]);
+        }
+
+        return redirect()->route('einstellungen.index')
+            ->with('status', 'Die vinicore-Systemfarben wurden erfolgreich aktualisiert!');
     }
 
 }
