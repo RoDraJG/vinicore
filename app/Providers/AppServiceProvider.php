@@ -15,27 +15,39 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Dynamischer ERP-Türsteher für globale Administratoren
-        Gate::before(function ($user, $ability) {
-            // Holt die Rolle absolut ausfallsicher direkt über die Pivot-Tabelle
-            $istAdmin = DB::table('role_user')
-                ->join('roles', 'roles.id', '=', 'role_user.role_id')
-                ->where('role_user.user_id', $user->id)
-                ->where('roles.slug', '=', 'admin')
-                ->exists();
-
-            if ($istAdmin) {
-                return true;
+        Gate::before(function ($user, $ability, $arguments = []) {
+            if (!$user) {
+                return null;
             }
+
+            $roleId = $user->vinicore_rolle_id ?? null;
+
+            if ($roleId !== null) {
+                $roleName = DB::table('vinicore_rollen')->where('id', $roleId)->value('name');
+
+                if ($roleName === 'admin') {
+                    return true;
+                }
+            }
+
+            return null;
         });
 
-        // Definiert die dynamische Berechtigungs-Prüfung für Module (z.B. @can('kataster.edit'))
         Gate::define('check-permission', function ($user, $permissionSlug) {
-            return DB::table('role_user')
-                ->join('permission_role', 'permission_role.role_id', '=', 'role_user.role_id')
-                ->join('permissions', 'permissions.id', '=', 'permission_role.permission_id')
-                ->where('role_user.user_id', $user->id)
-                ->where('permissions.slug', '=', $permissionSlug)
+            if (!$user) {
+                return false;
+            }
+
+            $roleId = $user->vinicore_rolle_id ?? null;
+
+            if ($roleId === null) {
+                return false;
+            }
+
+            return DB::table('berechtigung_rolle as br')
+                ->join('vinicore_berechtigungen as b', 'b.id', '=', 'br.berechtigung_id')
+                ->where('br.rolle_id', $roleId)
+                ->where('b.slug', $permissionSlug)
                 ->exists();
         });
     }

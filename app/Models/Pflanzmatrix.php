@@ -5,9 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-class Parzelle extends Model
+class Pflanzmatrix extends Model
 {
-    protected $table = 'parzellen';
+    protected $table = 'pflanzmatrizen';
 
     // Wir deklarieren die parzelle_uuid als primären Erkennungsschlüssel für Relationen
     protected $primaryKey = 'id';

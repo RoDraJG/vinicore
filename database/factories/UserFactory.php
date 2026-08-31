@@ -25,21 +25,23 @@ class UserFactory extends Factory
     public function definition(): array
     {
         return [
+            'betrieb_id' => 1,
+            'username' => fake()->unique()->userName(),
             'name' => fake()->name(),
-            'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            'is_hauptnutzer' => false,
+            'erlaubte_gemarkungen' => json_encode(['Allgemein']),
             'remember_token' => Str::random(10),
         ];
     }
 
     /**
-     * Indicate that the model's email address should be unverified.
+     * Keep compatibility with older auth tests that expect an unverified state.
      */
     public function unverified(): static
     {
         return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
+            'is_hauptnutzer' => false,
         ]);
     }
 }
