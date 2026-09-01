@@ -4,41 +4,41 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Registriert die betrieblichen ERP-Berechtigungen.
-     * 🚀 CORE-FIX: Native DB-Abfragen verhindern jeglichen Namespace- oder Reflection-Absturz!
-     */
     public function boot(): void
     {
-        // Dynamischer ERP-Türsteher für globale Administratoren
-        Gate::before(function ($user, $ability) {
-            // Holt die Rolle absolut ausfallsicher direkt über die Pivot-Tabelle
-            $istAdmin = DB::table('role_user')
-                ->join('roles', 'roles.id', '=', 'role_user.role_id')
-                ->where('role_user.user_id', $user->id)
-                ->where('roles.slug', '=', 'admin')
-                ->exists();
+        // 🛡️ 1. GLOBALER TÜRSTEHER FÜR ADMINISTRATOREN
+        Gate::before(function (User $user, string $ability) {
+            $rolle = DB::table('vinicore_rollen')
+                ->where('id', $user->vinicore_rolle_id)
+                ->first();
 
-            if ($istAdmin) {
+            if ($rolle && $rolle->name === 'admin') {
                 return true;
             }
         });
 
-        // Definiert die dynamische Berechtigungs-Prüfung für Module (z.B. @can('kataster.edit'))
-        Gate::define('check-permission', function ($user, $permissionSlug) {
-            return DB::table('role_user')
-                ->join('permission_role', 'permission_role.role_id', '=', 'role_user.role_id')
-                ->join('permissions', 'permissions.id', '=', 'permission_role.permission_id')
-                ->where('role_user.user_id', $user->id)
-                ->where('permissions.slug', '=', $permissionSlug)
+        // 🔑 2. DYNAMISCHE BERECHTIGUNGS-PRÜFUNG FÜR SLUGS
+        Gate::define('check-permission', function (User $user, string $permissionSlug) {
+            if (!$user->vinicore_rolle_id) {
+                return false;
+            }
+
+            return DB::table('berechtigung_rolle')
+                ->join('vinicore_berechtigungen', 'berechtigung_rolle.berechtigung_id', '=', 'vinicore_berechtigungen.id')
+                ->where('berechtigung_rolle.rolle_id', $user->vinicore_rolle_id)
+                ->where('vinicore_berechtigungen.slug', $permissionSlug)
                 ->exists();
         });
-    }
 
+        // 🚀 3. ANMELDUNG DER MODULAREN CRM-VIEWS
+            if (is_dir(app_path('Modules/CRM/Views'))) {
+            $this->loadViewsFrom(app_path('Modules/CRM/Views'), 'CRM');
+        }
+    }
 }
 

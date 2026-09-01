@@ -67,5 +67,39 @@ class User extends Authenticatable
             ->where('betrieb_id', $this->betrieb_id)
             ->first();
     }
+    /**
+     * 🔗 VERKNÜPFUNG ZUR ROLLE (BelongsTo - Da 1:n laut deiner Migration!)
+     */
+    public function rolle()
+    {
+        return $this->belongsTo(\App\Models\Role::class, 'vinicore_rolle_id'); //
+    }
+
+    /**
+     * 🛡️ RECHTE-CHECK (Prüft den Berechtigungs-Slug über die Rolle)
+     */
+    public function hasPermission(string $slug): bool
+    {
+        // Holt die Rolle des Users
+        $rolle = \Illuminate\Support\Facades\DB::table('vinicore_rollen')
+            ->where('id', $this->vinicore_rolle_id)
+            ->first();
+
+        if (!$rolle) {
+            return false;
+        }
+
+        // Ein Admin darf ausnahmslos alles
+        if ($rolle->name === 'admin') {
+            return true;
+        }
+
+        // Prüft, ob das Recht in der Kreuztabelle existiert
+        return \Illuminate\Support\Facades\DB::table('berechtigung_rolle')
+            ->join('vinicore_berechtigungen', 'berechtigung_rolle.berechtigung_id', '=', 'vinicore_berechtigungen.id')
+            ->where('berechtigung_rolle.rolle_id', $this->vinicore_rolle_id)
+            ->where('vinicore_berechtigungen.slug', $slug)
+            ->exists();
+    }
 
 }

@@ -21,25 +21,25 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * Holt die Validierungsregeln für die Anmeldung.
+     * Get the validation rules that apply to the request.
      */
     public function rules(): array
     {
         return [
-            // 🚀 REPARATUR: Validiert nun den 'username' statt der E-Mail!
-            'username' => ['required', 'string'], 
+            // 🚀 JETZT NEU: Validiert den Benutzernamen statt der E-Mail!
+            'username' => ['required', 'string'],
             'password' => ['required', 'string'],
         ];
     }
 
     /**
-     * Versucht, die im Request übergebenen Daten zu authentifizieren.
+     * Attempt to authenticate the request's credentials.
      */
     public function authenticate(): void
     {
         $this->ensureIsNotRateLimited();
 
-        // 🚀 REPARATUR: Übergibt den 'username' an Laravels Auth-Attempt!
+        // 🚀 KERN-UMSCHALTUNG: Breeze prüft nun 'username' in der Datenbank!
         if (! Auth::attempt($this->only('username', 'password'), $this->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey());
 
@@ -50,6 +50,7 @@ class LoginRequest extends FormRequest
 
         RateLimiter::clear($this->throttleKey());
     }
+
 
 
     /**

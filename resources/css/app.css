@@ -1,3 +1,37 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* 🎯 REPARATUR: Tailwind v4 scannt jetzt unzerstörbar alle deine Modul- und CRM-Views! */
+@source "./resources/views/**/*.blade.php";
+@source "./app/Modules/**/Views/**/*.blade.php";
+@source "./storage/framework/views/*.php";
+
+@theme {
+    --color-bg-base: var(--bg-base);
+    --color-bg-surface: var(--bg-surface);
+    --color-bg-input: var(--bg-input);
+    --color-border-main: var(--border-main);
+    --color-text-main: var(--text-main);
+    --color-text-muted: var(--text-muted);
+    --color-accent-brand: var(--accent-brand);
+}
+
+:root, .theme-light {
+    --bg-base: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-input: #f1f5f9;
+    --border-main: #e2e8f0;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --accent-brand: #059669;
+}
+
+.theme-dark {
+    --bg-base: #0f172a;
+    --bg-surface: #1e293b;
+    --bg-input: #0f172a;
+    --border-main: #334155;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --accent-brand: #10b981;
+}
+

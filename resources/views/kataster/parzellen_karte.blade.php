@@ -1,5 +1,10 @@
 @extends('layouts.map_base')
 
+@section('styles_scripts')
+    <link rel="stylesheet" href="{{ asset('css/leaflet.css') }}" />
+    <script src="{{ asset('js/leaflet.js') }}"></script>
+@endsection
+
 <!-- ==========================================================================
      🛰️ REAKTIVES VINICORE SYSTEM-TOAST (PROZESSUAL GESICHERTER SITZ)
      ========================================================================== -->
