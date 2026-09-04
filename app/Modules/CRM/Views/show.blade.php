@@ -23,9 +23,10 @@
                     class="bg-bg-input hover:bg-border-main text-text-main font-mono text-xs font-semibold px-4 py-2 rounded-xl transition shadow-3xs cursor-pointer border border-border-main whitespace-nowrap">
                 📊 Blitz-Analyse
             </button>
-            <a href="#" class="bg-slate-900 hover:bg-slate-800 text-white font-mono text-xs font-semibold px-4 py-2 rounded-xl transition shadow-3xs text-center whitespace-nowrap no-underline border-0">
-                ✏️ Bearbeiten
-            </a>
+                <!-- 🎯 WORKFLOW-UPGRADE: Signalisiert der Bearbeitungsmaske, dass wir aus den Details kommen -->
+                <a href="{{ route('crm.edit', $kontakt->id) }}?ref=show" class="bg-slate-900 hover:bg-slate-800 text-white font-mono text-xs font-semibold px-4 py-2 rounded-xl transition shadow-3xs text-center whitespace-nowrap no-underline border-0">
+                    ✏️ Bearbeiten
+                </a>
         </div>
     </div>
 
@@ -33,25 +34,32 @@
     <div class="flex-1 overflow-y-auto min-h-0 p-3 md:p-4 bg-bg-base/20">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
             
-            <!-- Linker Flügel: Stammdaten & Logistik (Zwei Drittel Breite) -->
-            <div class="lg:col-span-2 space-y-4">
-                <!-- Karte 1: Anschriften & Kontakt -->
+                <!-- Karte 1: Anschriften & Kontakt (Repariert für getrennte Felder) -->
                 <div class="bg-bg-surface border border-border-main rounded-2xl shadow-3xs p-4 space-y-4">
+                    
+                    <!-- 🛡️ HIER INTEGRIERT: Rote Notbremsen-Warnung bei aktiver Liefersperre -->
+                    @if($kontakt->ist_gesperrt)
+                        <div class="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 font-mono font-bold uppercase tracking-wider animate-pulse flex items-center gap-2">
+                            <span>🚫 LIEFERSperre AKTIV: Dieser Partner ist für jeglichen Warenversand gesperrt!</span>
+                        </div>
+                    @endif
+
                     <div>
                         <label class="block text-[10px] uppercase font-mono tracking-wider font-bold text-text-muted mb-2">🏠 Rechnungsanschrift</label>
                         <div class="text-xs font-semibold text-text-main">
                             @if($kontakt->firma) <div class="text-xs font-bold mb-0.5 text-accent-brand">🏢 {{ $kontakt->firma }}</div> @endif
-                            <div>{{ $kontakt->strasse_nr }}{{ $kontakt->adresszusatz ? ' (' . $kontakt->adresszusatz . ')' : '' }}</div>
+                            @if($kontakt->ansprechpartner_name) <div class="text-[11px] text-text-muted mb-1 font-mono">👤 Ansprechpartner: {{ $kontakt->ansprechpartner_name }}</div> @endif
+                            <div>{{ $kontakt->strasse }} {{ $kontakt->hausnummer }}{{ $kontakt->adresszusatz ? ' (' . $kontakt->adresszusatz . ')' : '' }}</div>
                             <div class="font-mono text-[11px] text-text-muted mt-0.5">{{ $kontakt->plz }} {{ $kontakt->ort }}</div>
                         </div>
                     </div>
 
-                    @if($kontakt->liefer_strasse_nr)
+                    @if($kontakt->liefer_strasse)
                         <hr class="border-border-main/60">
                         <div>
                             <label class="block text-[10px] uppercase font-mono tracking-wider font-bold text-text-muted mb-2">📦 Abweichende Lieferanschrift</label>
                             <div class="text-xs font-semibold text-text-main">
-                                <div>{{ $kontakt->liefer_strasse_nr }}{{ $kontakt->liefer_adresszusatz ? ' (' . $kontakt->liefer_adresszusatz . ')' : '' }}</div>
+                                <div>{{ $kontakt->liefer_strasse }} {{ $kontakt->liefer_hausnummer }}{{ $kontakt->liefer_adresszusatz ? ' (' . $kontakt->liefer_adresszusatz . ')' : '' }}</div>
                                 <div class="font-mono text-[11px] text-text-muted mt-0.5">{{ $kontakt->liefer_plz }} {{ $kontakt->liefer_ort }}</div>
                             </div>
                         </div>
@@ -71,6 +79,7 @@
                         </div>
                     </div>
                 </div>
+
 
                 <!-- Karte 2: Versandsteuerung & Logistik-Routing -->
                 <div class="bg-bg-surface border border-border-main rounded-2xl shadow-3xs p-4 space-y-4">

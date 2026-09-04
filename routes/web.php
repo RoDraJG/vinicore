@@ -3,7 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use App\Modules\Kataster\Controllers\GisLiegenschaftenController;
-use App\Modules\CRM\Controllers\CrmController;
+use App\Modules\CRM\Controllers\CRMController;
+use App\Modules\Configuration\Controllers\GlobalConfigController;
 
 Route::get('/', function () {
     if (Auth::check()) {
@@ -28,18 +29,30 @@ Route::middleware(['auth'])->group(function () {
         Route::delete('/parzelle-loeschen/{uuid}', [GisLiegenschaftenController::class, 'loescheParzelleAusSammelKorb'])->name('kataster.parzelle.loeschen');
     });
     // ======================================================================
-    // 🏪 2. DOMÄNE: CENTRAL CRM (Fenster-Erfassung aktiviert)
+    // 🏪 2. DOMÄNE: CENTRAL CRM (Schnittstellen-Altlasten entfernt)
     // ======================================================================
     Route::group(['prefix' => 'crm', 'middleware' => ['web', 'auth']], function () {
-        // 🗂️ Übersicht & Register (Kunden/Lieferanten)
-        Route::get('/', [CrmController::class, 'index'])->name('crm.index');
+        // 1. Übersichten und Formulare (Spezifische Pfade immer nach oben!)
+        Route::get('/', [CRMController::class, 'index'])->name('crm.index');
+        Route::get('/create', [CRMController::class, 'create'])->name('crm.create');
+        Route::post('/store', [CRMController::class, 'store'])->name('crm.store');
         
-        // ➕ Partner-Erfassung (Formular & Speichern)
-        Route::get('/create', [CrmController::class, 'create'])->name('crm.create');
-        Route::post('/store', [CrmController::class, 'store'])->name('crm.store');
+        // 2. Das Bearbeitungsformular (Spezifischer als der nackte ID-Platzhalter)
+        Route::get('/{id}/edit', [CRMController::class, 'edit'])->name('crm.edit');
         
-        // 🔍 Die detaillierte Partner-Akte (Details-Button)
-        Route::get('/{id}', [CrmController::class, 'show'])->name('crm.show');
+        // 3. ID-Platzhalter (Immer ganz nach unten, damit sie nichts abfangen!)
+        Route::get('/{id}', [CRMController::class, 'show'])->name('crm.show');
+        Route::put('/{id}', [CRMController::class, 'update'])->name('crm.update');
+    });
+    // ======================================================================
+    // ⚙️ 3. DOMÄNE: CENTRAL CONFIGURATION & ADMIN-HUB
+    // ======================================================================
+    Route::group(['prefix' => 'admin', 'middleware' => ['web', 'auth', 'can:check-permission,admin.view']], function () {
+        
+        // Zentrales ERP-Konfigurationszentrum (Tabs über URL-Parameter ?tab=...)
+        Route::get('/konfiguration/einstellungen', [GlobalConfigController::class, 'index'])->name('admin.einstellungen');
+        Route::post('/konfiguration/nummernkreise', [GlobalConfigController::class, 'speichereNummernkreise'])->name('admin.nummernkreise.store');
+        
     });
 
 
@@ -50,6 +63,5 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/vertrag/entwurf-initialisieren', [GisLiegenschaftenController::class, 'initialisiereEntwurf'])->name('finanzen.vertrag.entwurf.init');
         Route::post('/vertrag/entwurf-parzellen-sync', [GisLiegenschaftenController::class, 'synchronisiereEntwurfsParzellen'])->name('finanzen.vertrag.entwurf.sync');
         Route::post('/vertrag/final-versiegeln', [GisLiegenschaftenController::class, 'finalVersiegeln'])->name('finanzen.vertrag.versiegeln');});
-        Route::group(['prefix' => 'admin'], function () {// Zukünftiges ACL-Schaltpult
-    });
+
 });

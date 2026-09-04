@@ -31,7 +31,8 @@
         </button>
     </div>
 
-    <!-- 🏛️ REPARATUR 2: z-50 schiebt das Menü ÜBER den Blur; bg-white macht es absolut blickdicht mobil -->
+    <!-- 🎯 REPARATUR 1: Blendet das normale Hauptmenü aus, wenn wir uns in den Einstellungen befinden -->
+    @if(!request()->routeIs('admin.einstellungen'))
     <aside id="vinicoreSidebar" 
            class="fixed inset-y-0 left-0 md:relative transform -translate-x-full md:translate-x-0 transition-all duration-300 ease-in-out z-50 flex flex-col h-full bg-white border-r border-border-main shadow-lg md:shadow-none w-60
                   {{ (session()->has('sidebar_collapsed') && session('sidebar_collapsed')) ? 'md:w-14' : 'md:w-60' }}">
@@ -68,7 +69,7 @@
 
             @can('check-permission', 'crm.view')
             <div class="space-y-0.5 pt-1">
-                <div class="section-geo-label px-2 mb-1.5 text-[9px] uppercase font-mono tracking-wider font-bold text-text-muted transition-opacity duration-200 {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">🏪 Handel & CRM</div>
+                <div class="section-geo-label px-2 mb-1.5 text-[9px] uppercase font-mono tracking-wider font-bold text-text-muted transition-opacity duration-200 {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">🏪 Handel &amp; CRM</div>
                 <a href="{{ route('crm.index') }}" class="flex items-center h-10 px-2.5 rounded-xl text-sm font-medium no-underline gap-3 transition-colors {{ Request::is('crm*') ? 'bg-emerald-50 text-emerald-700 font-bold border border-emerald-100' : 'text-text-main hover:bg-bg-input' }}">
                     <svg class="w-4 h-4 flex-shrink-0 transition-colors {{ Request::is('crm*') ? 'text-emerald-600' : 'text-text-muted' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     <span class="sidebar-menu-text truncate transition-opacity duration-200 text-xs {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">Partner-Register</span>
@@ -80,7 +81,7 @@
                 <div class="section-geo-label px-2 text-[9px] uppercase font-mono tracking-wider font-bold text-text-muted transition-opacity duration-200 {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">🚜 Außenbetrieb</div>
                 <a href="/schlaege/schlag-karte" class="flex items-center h-10 px-2.5 rounded-xl text-sm font-medium no-underline gap-3 transition-colors {{ Request::is('schlaege/*') ? 'bg-emerald-50 text-emerald-700 font-bold border border-emerald-100' : 'text-text-main hover:bg-bg-input' }}">
                     <svg class="w-4 h-4 flex-shrink-0 transition-colors {{ Request::is('schlaege/*') ? 'text-emerald-600' : 'text-text-muted' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 4L9 7" /></svg>
-                    <span class="sidebar-menu-text truncate transition-opacity duration-200 text-xs {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">Schläge & Anlagen</span>
+                    <span class="sidebar-menu-text truncate transition-opacity duration-200 text-xs {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">Schläge &amp; Anlagen</span>
                 </a>
             </div>
 
@@ -88,7 +89,7 @@
                 <div class="section-geo-label px-2 text-[9px] uppercase font-mono tracking-wider font-bold text-text-muted transition-opacity duration-200 {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">🍷 Innenbetrieb</div>
                 <a href="#" class="flex items-center h-10 px-2.5 rounded-xl text-sm font-medium no-underline gap-3 text-text-main/40 hover:bg-bg-input cursor-not-allowed opacity-50">
                     <svg class="w-4 h-4 flex-shrink-0 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-                    <span class="sidebar-menu-text truncate text-xs {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">Kellerbuch & Analysen</span>
+                    <span class="sidebar-menu-text truncate text-xs {{ session('sidebar_collapsed') ? 'md:opacity-0 md:hidden' : 'opacity-100' }}">Kellerbuch &amp; Analysen</span>
                 </a>
             </div>
         </div>
@@ -97,6 +98,8 @@
             &copy; 2026 vinicore
         </div>
     </aside>
+    @endif
+
     <div class="flex-1 flex flex-col min-w-0 mt-14 md:mt-0 relative transition-all duration-300 h-full overflow-hidden">
         
         <!-- 🏢 Der obere Kontroll-Header (Vollständig repariert und abgesichert) -->
@@ -109,16 +112,16 @@
             </div>
 
             <div class="flex items-center space-x-2">
-                <!-- Buttons für administrative Betriebsfunktionen -->
-                <button onclick="window.location.href='/betrieb/daten'" class="hidden sm:flex items-center space-x-1.5 bg-bg-input hover:bg-border-main text-text-main px-3 py-1.5 rounded-xl border border-border-main transition-colors font-medium text-xs cursor-pointer shadow-3xs">
-                    <svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H5a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m0 0V11m0 0h5m-5 0H5m5 0v3m5-3v3m1-7H7m12 3H7m12 3H7" /></svg>
-                    <span>Betriebsdaten</span>
-                </button>
-                <button onclick="window.location.href='/admin/dashboard'" class="hidden sm:flex items-center space-x-1.5 bg-bg-input hover:bg-border-main text-text-main px-3 py-1.5 rounded-xl border border-border-main transition-colors font-medium text-xs cursor-pointer shadow-3xs">
-                    <svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" /></svg>
-                    <span>Admin-Panel</span>
-                </button>
+                <!-- 🎯 REPARATUR 2: Zentraler, geschützter Absprung-Link in den neuen Einstellungs-Hub -->
+                @if(auth()->user() && (Gate::check('admin.view') || Gate::check('nummernkreise bearbeiten') || Gate::check('betrieb verwalten')))
+                    <a href="{{ route('admin.einstellungen', ['tab' => 'nummernkreise']) }}" class="flex items-center space-x-1.5 bg-bg-input hover:bg-border-main text-text-main px-3 py-1.5 rounded-xl border border-border-main transition-colors font-medium text-xs no-underline shadow-3xs cursor-pointer">
+                        <svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" /></svg>
+                        <span>Systemeinstellungen</span>
+                    </a>
+                @endif
+
                 <div class="h-5 w-px bg-border-main hidden sm:block"></div>
+
                 <!-- Rechte Flanke: Authentifizierungs-Ebene -->
                 @auth
                     <div class="flex items-center space-x-1 bg-slate-50 border border-slate-200 p-0.5 rounded-xl">
@@ -150,7 +153,7 @@
                    class="hidden w-0 h-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col flex-shrink-0 transition-all duration-300 ease-in-out">
                 <div class="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 flex-shrink-0">
                     <h4 id="globalInspektorTitel" class="font-bold text-slate-800 font-mono tracking-wider text-[11px] uppercase flex items-center gap-1.5">📋 System-Inspektor</h4>
-                    <button onclick="SchließeGlobalenInspektor()" class="text-slate-400 hover:text-slate-600 font-bold text-base cursor-pointer px-1">&times;</button>
+                    <button onclick="SchliesseGlobalenInspektor()" class="text-slate-400 hover:text-slate-600 font-bold text-base cursor-pointer px-1">&times;</button>
                 </div>
                 <div id="globalInspektorBody" class="flex-1 p-3 overflow-y-auto min-h-0 text-sm">
                     @yield('inspektor_content')

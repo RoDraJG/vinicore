@@ -13,35 +13,28 @@
             <p class="text-[11px] text-text-muted mt-0.5">Kaufmännische Verwaltung, DATEV-Schnittstellen und Adresslogistik aller Kontakte.</p>
         </div>
         
-        <!-- Rechte Flanke: Dezente Suche & Button nebeneinander -->
+        <!-- 🎯 LIVE-SUCHE: Formular-Absenden wird blockiert, das Input-Feld wird per JS überwacht -->
         <div class="flex items-center gap-2 w-full lg:w-auto">
-            <form action="{{ route('crm.index') }}" method="GET" class="relative w-full sm:w-60 m-0">
-                <input type="hidden" name="typ" value="{{ $typ }}">
-                <button type="submit" class="absolute inset-y-0 left-0 flex items-center pl-3 bg-transparent border-0 text-text-muted text-xs cursor-pointer hover:text-text-main transition-colors">🔍</button>
+            <div class="relative w-full sm:w-60 m-0">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-text-muted text-xs pointer-events-none">🔍</span>
                 <input type="text" 
+                       id="crmLiveSuchFeld"
                        name="suche" 
                        value="{{ $search }}"
-                       placeholder="Partner suchen..." 
+                       placeholder="Partner live suchen..." 
                        class="w-full bg-bg-input text-text-main text-xs rounded-xl border border-border-main pl-8 pr-8 py-2 focus:outline-none focus:ring-1 focus:ring-accent-brand font-medium">
-                @if(!empty($search))
-                    <a href="{{ route('crm.index', ['typ' => $typ]) }}" class="absolute inset-y-0 right-0 flex items-center pr-3 text-text-muted hover:text-red-500 font-mono text-[10px] no-underline">✕</a>
-                @endif
-            </form>
+                
+                <button type="button" 
+                        id="crmSuchClearBtn"
+                        onclick="LeereLiveSuche()" 
+                        class="absolute inset-y-0 right-0 flex items-center pr-3 text-text-muted hover:text-red-500 font-mono text-[10px] bg-transparent border-0 cursor-pointer {{ empty($search) ? 'hidden' : '' }}">✕</button>
+            </div>
 
-            <!-- Rechte Flanke: Suche, Inspektor-Schalter & Erfassen-Button -->
+            <!-- Rechte Flanke: Nur die Suche und der Erfassen-Button -->
             <a href="{{ route('crm.create') }}" 
                class="bg-slate-900 hover:bg-slate-800 text-white font-mono text-xs font-semibold px-4 py-2 rounded-xl transition shadow-3xs cursor-pointer border-0 text-center whitespace-nowrap no-underline">
                 ➕ Erfassen
             </a>
-
-            <!-- 🎯 REPARATUR 1: Globaler Inspektor-Toggle für das Cockpit-Feature -->
-            <button type="button" 
-                    onclick="ToggleZentraleInspektor()" 
-                    id="inspektorSystemBtn"
-                    class="bg-bg-input hover:bg-border-main text-text-main font-mono text-xs font-semibold px-4 py-2 rounded-xl transition shadow-3xs cursor-pointer border border-border-main text-center whitespace-nowrap">
-                📋 Assistent Off
-            </button>
-
         </div>
     </div>
 
@@ -62,12 +55,12 @@
             </a>
         </div>
     </div>
-    <!-- 🗂️ Datentabelle (min-h-[500px] zwingt den Browser, die Auto-Höhe im Vollbild zu brechen!) -->
-    <div class="flex-1 w-full overflow-y-auto bg-bg-base/30">
+    <!-- 🎯 REPARATUR 2: ID crmDynamischerInhalt erlaubt das asynchrone Austauschen der Daten per Fetch -->
+    <div id="crmDynamischerInhalt" class="flex-1 w-full overflow-y-auto bg-bg-base/30">
         
-        <!-- 🖥️ DESKTOP-ANSICHT: min-h erzwingt den Platz auf großen Monitoren -->
-        <div class="hidden md:block overflow-x-auto w-full min-h-[500px] lg:min-h-[600px]">
-            <table class="w-full text-left border-collapse min-w-[800px]">
+        <!-- 🖥️ DESKTOP-ANSICHT -->
+        <div class="hidden md:block overflow-x-auto w-full">
+            <table class="w-full text-left border-collapse">
                 <thead class="bg-bg-base border-b border-border-main text-[10px] font-mono text-text-muted uppercase tracking-wider sticky top-0 z-10">
                     <tr>
                         <th class="pl-4 py-3 font-semibold">Kürzel / DATEV</th>
@@ -78,23 +71,23 @@
                         <th class="pr-4 py-3 text-right">Aktion</th>
                     </tr>
                 </thead>
-                <tbody class="text-xs divide-y divide-border-main/50 bg-bg-surface">
-                        <!-- 🎯 REPARATUR 2: Vollkommen absturzsicher ohne Backslash-Kollisionen im Blade-Compiler -->
-                        @forelse($kontakte as $k)
-                            <tr class="hover:bg-bg-base/40 transition-colors cursor-crosshair"
-                                onmouseenter="FüttereInspektorAufHover({
-                                    nachname: '{{ addslashes($k->nachname) }}',
-                                    vorname: '{{ addslashes($k->vorname ?? '') }}',
-                                    firma: '{{ addslashes($k->firma ?? '-') }}',
-                                    rolle: '{{ $k->ist_kunde ? '🍷 Weinkunde' : '📦 Lieferant' }}',
-                                    datev: '{{ $k->debitorennummer ?? $k->kreditorennummer ?? 'Keine DATEV-Koppelung' }}',
-                                    adresse: '{{ addslashes($k->strasse_nr ?? '') }}, {{ $k->plz }} {{ addslashes($k->ort ?? '') }}',
-                                    stil: '{{ $k->bevorzugte_weinstilistik ? ucfirst($k->bevorzugte_weinstilistik) : 'Keine Angabe' }}',
-                                    news: '{{ $k->newsletter_erlaubt ? '✉️ Abonniert' : '❌ Blockiert' }}',
-                                    ziel: '{{ $k->standard_zahlungsziel_tage }} Tage Ziel'
-                                })">
-
-
+                <!-- 🎯 ID für den asynchronen Zeilen-Austausch (Zeilen-Klick steuert den Inspektor) -->
+                <tbody id="crmDesktopTabellenBody" class="text-xs divide-y divide-border-main/50 bg-bg-surface">
+                    @forelse($kontakte as $k)
+                        <!-- 🎯 UNZERSTÖRBAR: onclick auf dem tr-Tag öffnet den Inspektor bei Zeilenklick -->
+                        <tr class="hover:bg-bg-base/40 transition-colors cursor-pointer"
+                            onclick="ErmittleZeilenKlick(event, {
+                                id: '{{ $k->id }}',
+                                nachname: '{{ addslashes($k->nachname) }}',
+                                vorname: '{{ addslashes($k->vorname ?? '') }}',
+                                firma: '{{ addslashes($k->firma ?? '-') }}',
+                                rolle: '{{ $k->ist_kunde ? '🍷 Weinkunde' : '📦 Lieferant' }}',
+                                datev: '{{ $k->debitorennummer ?? $k->kreditorennummer ?? 'Keine DATEV-Koppelung' }}',
+                                adresse: '{{ addslashes($k->strasse_nr ?? '') }}, {{ $k->plz }} {{ addslashes($k->ort ?? '') }}',
+                                stil: '{{ $k->bevorzugte_weinstilistik ? ucfirst($k->bevorzugte_weinstilistik) : 'Keine Angabe' }}',
+                                news: '{{ $k->newsletter_erlaubt ? '✉️ Abonniert' : '❌ Blockiert' }}',
+                                ziel: '{{ $k->standard_zahlungsziel_tage }} Tage Ziel'
+                            })">
                             <td class="pl-4 py-3 font-mono">
                                 @if($k->ist_kunde)
                                     <div class="font-bold text-emerald-600">K-{{ $k->kundennummer }}</div>
@@ -106,7 +99,10 @@
                                 @endif
                             </td>
                             <td class="py-3">
-                                <div class="font-semibold text-text-main">{{ $k->nachname }}{{ $k->vorname ? ', ' . $k->vorname : '' }}</div>
+                                <!-- 🎯 LINK SCHUTZ: Klick auf den Namen führt sicher in die tiefe Kundenakte (show) -->
+                                <a href="{{ route('crm.show', $k->id) }}" class="font-bold text-text-main hover:text-accent-brand no-underline transition-colors inline-block relative z-10">
+                                    {{ $k->nachname }}{{ $k->vorname ? ', ' . $k->vorname : '' }}
+                                </a>
                                 @if($k->firma) <div class="text-[10px] text-text-muted mt-0.5 fw-medium">{{ $k->firma }}</div> @endif
                                 @if($k->geburtsdatum) <div class="text-[9px] text-slate-400 font-mono mt-0.5">🎂 {{ \Carbon\Carbon::parse($k->geburtsdatum)->format('d.m.Y') }}</div> @endif
                             </td>
@@ -126,22 +122,20 @@
                                 @if($k->newsletter_erlaubt) <span class="inline-flex items-center rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100 text-[9px] px-1.5 py-0.5 mt-1 font-medium font-mono ml-1">✉️ News</span> @endif
                             </td>
                             <td class="pr-4 py-3 text-right">
-                                <!-- 🎯 Echte Routenverknüpfung für die Details -->
-                                <a href="{{ route('crm.show', $k->id) }}" class="inline-flex items-center bg-bg-input hover:bg-border-main text-text-main px-2.5 py-1 rounded-lg border border-border-main text-[11px] font-mono no-underline transition-colors shadow-3xs">🔍 Details</a>
-
+                                <!-- 🎯 LINK SCHUTZ: Klick führt sicher direkt in die Bearbeitung (edit) -->
+                                <a href="{{ route('crm.edit', $k->id) }}?ref=index" class="inline-flex items-center bg-bg-input hover:bg-border-main text-text-main px-2.5 py-1 rounded-lg border border-border-main text-[11px] font-mono no-underline transition-colors shadow-3xs relative z-10">✏️ Bearbeiten</a>
                             </td>
                         </tr>
                     @empty
                         <tr><td colspan="6" class="text-center py-8 font-mono text-xs text-text-muted bg-bg-base/10">⚠️ Keine Treffer.</td></tr>
                     @endforelse
                 </tbody>
+
             </table>
         </div>
-
-
-        <!-- 📱 MOBILE LISTENANSICHT (Wird ab md:hidden auf Desktop-Bildschirmen unsichtbar) -->
-        <div class="block md:hidden divide-y divide-border-main/50 w-full overflow-hidden bg-bg-surface rounded-2xl border border-border-main shadow-3xs">
-            @forelse($kontakte as $k)
+        <!-- 📱 MOBILE LISTENANSICHT (Ebenfalls umgedrehte Links für konsistenten Workflow) -->
+        <div id="crmMobileKartenContainer" class="block md:hidden divide-y divide-border-main/50 w-full overflow-hidden bg-bg-surface rounded-2xl border border-border-main shadow-3xs">
+            @forelse($contacts ?? $kontakte as $k)
                 <div class="p-4 flex flex-col gap-2 bg-bg-surface hover:bg-bg-base/20 transition-colors w-full">
                     <div class="flex items-center justify-between w-full">
                         <span class="font-mono text-xs font-bold">
@@ -153,173 +147,238 @@
                         </div>
                     </div>
                     <div class="w-full truncate">
-                        <div class="text-xs font-bold text-text-main truncate">{{ $k->nachname }}{{ $k->vorname ? ', ' . $k->vorname : '' }}</div>
+                        <!-- 🎯 MOBIL-OPTIMIERUNG: Name führt zur Akte (show) -->
+                        <a href="{{ route('crm.show', $k->id) }}" class="text-xs font-bold text-text-main block truncate no-underline">
+                            {{ $k->nachname }}{{ $k->vorname ? ', ' . $k->vorname : '' }}
+                        </a>
                         @if($k->firma) <div class="text-[10px] text-text-muted mt-0.5 truncate">{{ $k->firma }}</div> @endif
                     </div>
                     <div class="mt-2 pt-2 border-t border-border-main/40 flex justify-end w-full">
-                        <!-- 🎯 Echte Routenverknüpfung für die Details -->
-                        <a href="{{ route('crm.show', $k->id) }}" class="inline-flex items-center bg-bg-input hover:bg-border-main text-text-main px-2.5 py-1 rounded-lg border border-border-main text-[11px] font-mono no-underline transition-colors shadow-3xs">🔍 Details</a>
-
+                        <!-- 🎯 MOBIL-OPTIMIERUNG: Button führt zum Bearbeiten (edit) -->
+                        <a href="{{ route('crm.edit', $k->id) }}" class="inline-flex items-center bg-bg-input text-text-main px-3 py-1.5 rounded-xl border border-border-main text-xs font-mono no-underline shadow-3xs w-full justify-center">✏️ Bearbeiten</a>
                     </div>
                 </div>
             @empty
                 <div class="text-center py-8 font-mono text-xs text-text-muted bg-bg-base/10 w-full">⚠️ Keine Treffer.</div>
             @endforelse
         </div>
+
         <div class="p-2"></div>
     </div>
-    <!-- 📊 DER VINICORE SEITENSELEKTOR -->
-    @if($kontakte->hasPages())
-        <div class="bg-bg-base border-t border-border-main px-4 py-3 flex items-center justify-between flex-shrink-0 z-10 w-full">
-            <div class="flex flex-1 justify-between sm:hidden w-full">
-                @if($kontakte->onFirstPage())
-                    <span class="inline-flex items-center justify-center bg-bg-input text-text-muted/60 font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main cursor-not-allowed">← Zurück</span>
-                @else
-                    <a href="{{ $kontakte->previousPageUrl() }}" class="inline-flex items-center justify-center bg-bg-surface hover:bg-bg-input text-text-main font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main transition-colors no-underline shadow-3xs">← Zurück</a>
-                @endif
 
-                @if($kontakte->hasMorePages())
-                    <a href="{{ $kontakte->nextPageUrl() }}" class="inline-flex items-center justify-center bg-bg-surface hover:bg-bg-input text-text-main font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main transition-colors no-underline shadow-3xs">Weiter →</a>
-                @else
-                    <span class="inline-flex items-center justify-center bg-bg-input text-text-muted/60 font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main cursor-not-allowed">Weiter →</span>
-                @endif
-            </div>
+    <!-- 📊 DER VINICORE SEITENSELEKTOR (Mit reaktivem Live-Such-Gehäuse umschlossen) -->
+    <div id="crmZentralePagination" class="w-full">
+        @if(method_exists($kontakte, 'hasPages') && $kontakte->hasPages())
+            <div class="bg-bg-base border-t border-border-main px-4 py-3 flex items-center justify-between flex-shrink-0 z-10 w-full">
+                <div class="flex flex-1 justify-between sm:hidden w-full">
+                    @if($kontakte->onFirstPage())
+                        <span class="inline-flex items-center justify-center bg-bg-input text-text-muted/60 font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main cursor-not-allowed">← Zurück</span>
+                    @else
+                        <a href="{{ $kontakte->previousPageUrl() }}" class="inline-flex items-center justify-center bg-bg-surface hover:bg-bg-input text-text-main font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main transition-colors no-underline shadow-3xs">← Zurück</a>
+                    @endif
 
-            <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between w-full">
-                <div>
-                    <p class="text-[11px] font-mono text-text-muted m-0">
-                        Zeige <span class="font-bold text-text-main">{{ $kontakte->firstItem() ?? 0 }}</span> bis <span class="font-bold text-text-main">{{ $kontakte->lastItem() ?? 0 }}</span> von <span class="font-bold text-text-main">{{ $kontakte->total() }}</span> Partnern
-                    </p>
+                    @if($kontakte->hasMorePages())
+                        <a href="{{ $kontakte->nextPageUrl() }}" class="inline-flex items-center justify-center bg-bg-surface hover:bg-bg-input text-text-main font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main transition-colors no-underline shadow-3xs">Weiter →</a>
+                    @else
+                        <span class="inline-flex items-center justify-center bg-bg-input text-text-muted/60 font-mono text-xs px-3 py-1.5 rounded-xl border border-border-main cursor-not-allowed">Weiter →</span>
+                    @endif
                 </div>
-                <div>
-                    <nav class="isolate inline-flex -space-x-px rounded-xl bg-bg-input p-0.5" aria-label="Pagination">
-                        @if($kontakte->onFirstPage())
-                            <span class="relative inline-flex items-center px-2 py-1 text-text-muted/40 cursor-not-allowed text-xs">◀</span>
-                        @else
-                            <a href="{{ $kontakte->previousPageUrl() }}" class="relative inline-flex items-center px-2 py-1 text-text-muted hover:text-text-main text-xs no-underline">◀</a>
-                        @endif
 
-                        @foreach($kontakte->getUrlRange(1, $kontakte->lastPage()) as $page => $url)
-                            <a href="{{ $url }}" class="relative inline-flex items-center px-2.5 py-1 font-mono text-xs rounded-lg border-0 no-underline transition-all {{ $page == $kontakte->currentPage() ? 'bg-bg-surface text-accent-brand font-bold shadow-3xs' : 'text-text-muted hover:text-text-main' }}">
-                                {{ $page }}
-                            </a>
-                        @endforeach
+                <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between w-full">
+                    <div>
+                        <p class="text-[11px] font-mono text-text-muted m-0">
+                            Zeige <span class="font-bold text-text-main">{{ $kontakte->firstItem() ?? 0 }}</span> bis <span class="font-bold text-text-main">{{ $kontakte->lastItem() ?? 0 }}</span> von <span class="font-bold text-text-main">{{ $kontakte->total() }}</span> Partnern
+                        </p>
+                    </div>
+                    <div>
+                        <nav class="isolate inline-flex -space-x-px rounded-xl bg-bg-input p-0.5" aria-label="Pagination">
+                            @if($kontakte->onFirstPage())
+                                <span class="relative inline-flex items-center px-2 py-1 text-text-muted/40 cursor-not-allowed text-xs">◀</span>
+                            @else
+                                <a href="{{ $kontakte->previousPageUrl() }}" class="relative inline-flex items-center px-2 py-1 text-text-muted hover:text-text-main text-xs no-underline">◀</a>
+                            @endif
 
-                        @if($kontakte->hasMorePages())
-                            <a href="{{ $kontakte->nextPageUrl() }}" class="relative inline-flex items-center px-2 py-1 text-text-muted hover:text-text-main text-xs no-underline">▶</a>
-                        @else
-                            <span class="relative inline-flex items-center px-2 py-1 text-text-muted/40 cursor-not-allowed text-xs">▶</span>
-                        @endif
-                    </nav>
+                            @foreach($kontakte->getUrlRange(1, $kontakte->lastPage()) as $page => $url)
+                                <a href="{{ $url }}" class="relative inline-flex items-center px-2.5 py-1 font-mono text-xs rounded-lg border-0 no-underline transition-all {{ $page == $kontakte->currentPage() ? 'bg-bg-surface text-accent-brand font-bold shadow-3xs' : 'text-text-muted hover:text-text-main' }}">
+                                    {{ $page }}
+                                </a>
+                            @endforeach
+
+                            @if($kontakte->hasMorePages())
+                                <a href="{{ $kontakte->nextPageUrl() }}" class="relative inline-flex items-center px-2 py-1 text-text-muted hover:text-text-main text-xs no-underline">▶</a>
+                            @else
+                                <span class="relative inline-flex items-center px-2 py-1 text-text-muted/40 cursor-not-allowed text-xs">▶</span>
+                            @endif
+                        </nav>
+                    </div>
                 </div>
             </div>
-        </div>
-    @endif
-
+        @endif
+    </div>
 </div>
-<!-- 🧠 DASHBOARD-COCKPIT: Intelligente Mausover- & Sichtbarkeitssteuerung -->
+<!-- 🧠 LIVE-SUCHE: Asynchroner Daten-Austausch (Search-on-Type) -->
 <script>
-    // Globaler Status, ob der Inspektor aktiv vom Winzer geöffnet wurde
-    let inspektorAktiviert = false;
+    let sucheDebounceTimer;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const suchFeld = document.getElementById('crmLiveSuchFeld');
+        if (suchFeld) {
+            suchFeld.addEventListener('input', (e) => {
+                const suchWert = e.target.value;
+                const clearBtn = document.getElementById('crmSuchClearBtn');
+                
+                if (clearBtn) {
+                    if (suchWert.length > 0) clearBtn.classList.remove('hidden');
+                    else clearBtn.classList.add('hidden');
+                }
+
+                // 250ms Debounce-Schutzschild vor Server-Überlastung
+                clearTimeout(sucheDebounceTimer);
+                sucheDebounceTimer = setTimeout(() => {
+                    FühreLiveSucheAus(suchWert);
+                }, 250); 
+            });
+        }
+    });
 
     /**
-     * Schaltet den System-Inspektor reaktiv ein oder aus
+     * Holt die gefilterten Daten asynchron per Fetch-API vom Controller
      */
-    function ToggleZentraleInspektor() {
-        const btn = document.getElementById('inspektorSystemBtn');
+    function FühreLiveSucheAus(suchWert) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const aktuellerTyp = urlParams.get('typ') || 'kunde';
         
-        if (!inspektorAktiviert) {
-            inspektorAktiviert = true;
-            if (btn) {
-                btn.innerHTML = '📋 Assistent On';
-                btn.classList.remove('bg-bg-input');
-                btn.classList.add('bg-emerald-600', 'text-white', 'border-emerald-600');
+        const zielUrl = `/crm?typ=${aktuellerTyp}&suche=${encodeURIComponent(suchWert)}`;
+        const container = document.getElementById('crmDynamischerInhalt');
+        
+        if (container) container.style.opacity = '0.6';
+
+        fetch(zielUrl, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
             }
-            
-            // 🎯 REPARATUR 2: Umlautfreier Aufruf
-            window.OeffneGlobalenInspektor(
-                '📋 CRM Live-Cockpit', 
-                `<div class="space-y-3 font-sans text-xs text-text-main">
-                    <div class="p-3 bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-xl font-mono text-[10px] font-bold uppercase tracking-wider">
-                        ⚡ Modus: Schwebe-Modus aktiv
-                    </div>
-                    <p class="text-text-muted m-0 leading-relaxed">Bewege deine Maus jetzt über die Tabellenzeilen, um die kaufmännischen Daten und Weinstilistiken des jeweiligen Partners live zu spiegeln.</p>
-                </div>`,
-                'w-80'
-            );
-        } else {
-            inspektorAktiviert = false;
-            if (btn) {
-                btn.innerHTML = '📋 Assistent Off';
-                btn.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-600');
-                btn.classList.add('bg-bg-input');
+        })
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // 1. Desktop-Tabelle live austauschen
+            const neueDesktopTabelle = doc.getElementById('crmDesktopTabellenBody');
+            const alteDesktopTabelle = document.getElementById('crmDesktopTabellenBody');
+            if (neueDesktopTabelle && alteDesktopTabelle) {
+                alteDesktopTabelle.innerHTML = neueDesktopTabelle.innerHTML;
             }
-            // 🎯 REPARATUR 3: Umlautfreier Aufruf
-            window.SchliesseGlobalenInspektor();
-        }
+
+            // 2. Mobile Touch-Karten live austauschen
+            const neueMobileKarten = doc.getElementById('crmMobileKartenContainer');
+            const alteMobileKarten = document.getElementById('crmMobileKartenContainer');
+            if (neueMobileKarten && alteMobileKarten) {
+                alteMobileKarten.innerHTML = neueMobileKarten.innerHTML;
+            }
+
+            // 3. Den Seitenselektor (Pagination) live austauschen
+            const neuePagination = doc.getElementById('crmZentralePagination');
+            const altePagination = document.getElementById('crmZentralePagination');
+            if (neuePagination && altePagination) {
+                altePagination.innerHTML = neuePagination.innerHTML;
+            }
+
+            window.history.pushState({}, '', zielUrl);
+            if (container) container.style.opacity = '1';
+        })
+        .catch(error => {
+            console.error('vinicore Live-Suche fehlgeschlagen:', error);
+            if (container) container.style.opacity = '1';
+        });
     }
 
-
-       /**
-     * Füttere den Inspektor im Vorbeifliegen, aber NUR wenn er geöffnet ist
+    /**
+     * Setzt die Live-Suche sofort auf den Nullzustand zurück
      */
-    function FüttereInspektorAufHover(data) {
-        // Abbruch, falls der Winzer den Assistenten nicht aktiv ausgefahren hat
-        if (!inspektorAktiviert) return;
+    function LeereLiveSuche() {
+        const suchFeld = document.getElementById('crmLiveSuchFeld');
+        const clearBtn = document.getElementById('crmSuchClearBtn');
+        if (suchFeld) {
+            suchFeld.value = '';
+            if (clearBtn) clearBtn.classList.add('hidden');
+            FühreLiveSucheAus('');
+        }
+    }
+    /**
+     * Aktiviert den Inspektor beim Klick auf das Info-Auge (👁️)
+     * Absolut sauber – nutzt exklusiv das originale Schließen-Kreuz deiner app.blade.php!
+     */
+    function ZeigePartnerImInspektor(data) {
+        const vollständigerName = data.vorname ? data.nachname + ', ' + data.vorname : data.nachname;
 
-        // Namen reaktiv und sauber zusammensetzen
-        const vollständigerName = data.vorname ? `${data.nachname}, ${data.vorname}` : data.nachname;
+        // 🎯 FIX: Der zusätzliche, unschöne Schließen-Button wurde restlos entfernt!
+        let htmlInhalt = '<div class="space-y-4 font-sans text-xs text-text-main animate-fade-in">';
+        
+        // Obere Aktionsleiste: Nur noch der saubere, direkte Link in die tiefe Akte
+        htmlInhalt += '<div class="flex justify-end bg-bg-input/60 p-1.5 rounded-xl border border-border-main/50 mb-2">';
+        htmlInhalt += '  <a href="/crm/' + data.id + '" class="text-[10px] font-mono bg-slate-900 hover:bg-slate-800 text-white px-2.5 py-1 rounded-lg no-underline transition-colors shadow-3xs font-bold flex items-center gap-1">🔍 Zur Partner-Akte →</a>';
+        htmlInhalt += '</div>';
 
-        const htmlInhalt = `
-            <div class="space-y-4 font-sans text-xs text-text-main animate-fade-in">
-                
-                <!-- Haupt-Identität -->
-                <div class="p-3 bg-bg-input rounded-xl border border-border-main shadow-3xs">
-                    <div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider">${data.rolle}</div>
-                    <div class="text-xs font-bold text-text-main mt-0.5">${vollständigerName}</div>
-                    ${data.firma !== '-' ? `<div class="text-[10px] text-accent-brand font-medium mt-0.5">🏢 ${data.firma}</div>` : ''}
-                </div>
+        // Haupt-Identität
+        htmlInhalt += '<div class="p-3 bg-bg-input rounded-xl border border-border-main shadow-3xs">';
+        htmlInhalt += '<div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider">' + data.rolle + '</div>';
+        htmlInhalt += '<div class="text-xs font-bold text-text-main mt-0.5">' + vollständigerName + '</div>';
+        if (data.firma !== '-') {
+            htmlInhalt += '<div class="text-[10px] text-accent-brand font-medium mt-0.5">🏢 ' + data.firma + '</div>';
+        }
+        htmlInhalt += '</div>';
 
-                <!-- Kaufmännische Daten & DATEV -->
-                <div class="space-y-1.5">
-                    <div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">📊 Buchhaltung & DATEV</div>
-                    <div class="bg-bg-surface border border-border-main rounded-xl p-2.5 space-y-1 font-mono text-[11px]">
-                        <div class="flex justify-between"><span class="text-text-muted">Konto / Nummer:</span><span class="font-bold text-text-main">${data.datev}</span></div>
-                        <div class="flex justify-between"><span class="text-text-muted">Kondition:</span><span class="text-purple-600 font-bold">${data.ziel}</span></div>
-                    </div>
-                </div>
 
-                <!-- Weinbau-Marketing -->
-                <div class="space-y-1.5">
-                    <div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">🍇 Weinbau-Präferenz</div>
-                    <div class="bg-bg-surface border border-border-main rounded-xl p-2.5 space-y-1">
-                        <div class="flex justify-between text-[11px]"><span class="text-text-muted">Stilistik:</span><span class="font-bold text-purple-700">${data.stil}</span></div>
-                        <div class="flex justify-between text-[11px]"><span class="text-text-muted">Newsletter:</span><span class="font-medium">${data.news}</span></div>
-                    </div>
-                </div>
+        // Kaufmännische Daten & DATEV
+        htmlInhalt += '<div class="space-y-1.5">';
+        htmlInhalt += '<div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">📊 Buchhaltung &amp; DATEV</div>';
+        htmlInhalt += '<div class="bg-bg-surface border border-border-main rounded-xl p-2.5 space-y-1 font-mono text-[11px]">';
+        htmlInhalt += '<div class="flex justify-between"><span class="text-text-muted">Konto / Nummer:</span><span class="font-bold text-text-main">' + data.datev + '</span></div>';
+        htmlInhalt += '<div class="flex justify-between"><span class="text-text-muted">Kondition:</span><span class="text-purple-600 font-bold">' + data.ziel + '</span></div>';
+        htmlInhalt += '</div></div>';
 
-                <!-- Logistik-Zusammenfassung -->
-                <div class="space-y-1.5">
-                    <div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">📦 Anschrift</div>
-                    <div class="bg-bg-surface border border-border-main rounded-xl p-2.5 text-[10px] text-text-muted leading-relaxed">
-                        ${data.adresse}
-                    </div>
-                </div>
+        // Weinbau-Marketing
+        htmlInhalt += '<div class="space-y-1.5">';
+        htmlInhalt += '<div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">🍇 Weinbau-Präferenz</div>';
+        htmlInhalt += '<div class="bg-bg-surface border border-border-main rounded-xl p-2.5 space-y-1">';
+        htmlInhalt += '<div class="flex justify-between text-[11px]"><span class="text-text-muted">Stilistik:</span><span class="font-bold text-purple-700">' + data.stil + '</span></div>';
+        htmlInhalt += '<div class="flex justify-between text-[11px]"><span class="text-text-muted">Newsletter:</span><span class="font-medium">' + data.news + '</span></div>';
+        htmlInhalt += '</div></div>';
 
-            </div>
-        `;
+        // Anschrift
+        htmlInhalt += '<div class="space-y-1.5">';
+        htmlInhalt += '<div class="text-[9px] font-mono font-bold text-text-muted uppercase tracking-wider px-1">📦 Anschrift</div>';
+        htmlInhalt += '<div class="bg-bg-surface border border-border-main rounded-xl p-2.5 text-[10px] text-text-muted leading-relaxed">' + data.adresse + '</div>';
+        htmlInhalt += '</div>';
 
+        htmlInhalt += '</div>';
+
+        // INTELLIGENTE PRÜFUNG: Ist der Inspektor bereits geöffnet?
+        const container = document.getElementById('globalVinicoreInspektor');
         const bodyElement = document.getElementById('globalInspektorBody');
         const titelElement = document.getElementById('globalInspektorTitel');
+
+        if (container && !container.classList.contains('hidden') && bodyElement) {
+            bodyElement.innerHTML = htmlInhalt;
+            if (titelElement) titelElement.innerHTML = '📋 Schnell-Check';
+        } else {
+            window.OeffneGlobalenInspektor('📋 Schnell-Check', htmlInhalt, 'w-80');
+        }
+    }
+    /**
+     * Fängt den Zeilen-Klick ab und blockiert ihn intelligent, falls ein Link getroffen wurde
+     */
+    function ErmittleZeilenKlick(event, data) {
+        // Prüfen, ob das angeklickte Element ein Link oder innerhalb eines Links/Buttons ist
+        const istLink = event.target.closest('a') || event.target.closest('button');
         
-        if (bodyElement) bodyElement.innerHTML = htmlInhalt;
-        if (titelElement) titelElement.innerHTML = '📋 Live-Partner-Check';
+        // Falls ein Link/Button getroffen wurde, tun wir nichts und lassen die Route gewähren
+        if (istLink) return;
+        
+        // Andernfalls: Feuere die fliegende Inspektor-Aktualisierung ab!
+        ZeigePartnerImInspektor(data);
     }
 
 </script>
-<style>
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
-    .animate-fade-in { animation: fadeIn 0.15s ease-out forwards; }
-</style>
-
 @endsection
