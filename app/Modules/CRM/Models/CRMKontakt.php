@@ -13,17 +13,23 @@ class CRMKontakt extends Model
 
     protected $table = 'crm_kontakte';
 
-        protected $fillable = [
-        'kontakt_uuid', 'partner_typ', 'betrieb_id', 'firma', 'ansprechpartner_name', 'nachname', 'vorname', 'geburtsdatum',
-        'kundennummer', 'lieferantennummer', 'debitorennummer', 'kreditorennummer', 'buchhaltung_gruppe',
-        'ist_kunde', 'ist_lieferant', 'ist_gesperrt', 'kunden_kategorie', 'email', 'telefon', 
-        'strasse', 'hausnummer', 'adresszusatz', 'plz', 'ort', 'land',
-        'liefer_strasse', 'liefer_hausnummer', 'liefer_adresszusatz', 'liefer_plz', 'liefer_ort', 'liefer_land',
-        'ust_id', 'steuernummer', 'ist_steuerbefreit', 'steuerbefreiung_grund',
-        'iban', 'bic', 'standard_zahlungsziel_tage', 'individueller_rabatt_prozent', 
-        'skonto_prozent', 'skonto_tage', 'lieferbedingungen', 'versanddienstleister', 
-        'speditions_hinweis', 'bevorzugte_weinstilistik', 'herkunft_kontakt', 'notizen'
+    protected $fillable = [
+        'kontakt_uuid', 'partner_typ', 'anrede', 'betrieb_id', 'firma', 
+        'rechtsform', // 🎯 B2B Neu
+        'ansprechpartner_name', 'nachname', 'vorname', 'geburtsdatum',
+        'strasse', 'hausnummer', 'adresszusatz', 'plz', 'ort',  
+        // 🎯 Abweichende Rechnungsdaten für Zentralregulierungen (Filial-System)
+        'weicht_rechnungsanschrift_ab', 'rechnung_firma', 'rechnung_strasse', 
+        'rechnung_hausnummer', 'rechnung_adresszusatz', 'rechnung_plz', 'rechnung_ort',
+        
+        'liefer_strasse', 'liefer_hausnummer', 'liefer_adresszusatz', 'liefer_plz', 'liefer_ort',
+        'kunden_kategorie', 'buchhaltung_gruppe', 'debitorennummer', 'kreditorennummer',
+        'standard_zahlungsziel_tage', 'individueller_rabatt_prozent', 'skonto_prozent', 'skonto_tage',
+        'lieferbedingungen', 'versanddienstleister', 'speditions_hinweis', 
+        'ust_id', 'steuernummer', 'leitweg_id', // 🎯 B2B Neu
+        'iban', 'bic', 'bevorzugte_weinstilistik', 'herkunft_kontakt', 'email', 'telefon', 'notizen'
     ];
+
 
     /**
      * 🚀 AUTOMATISCHE UUID-GENERIERUNG

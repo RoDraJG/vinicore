@@ -53,7 +53,11 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/konfiguration/einstellungen', [GlobalConfigController::class, 'index'])->name('admin.einstellungen');
         Route::post('/konfiguration/nummernkreise', [GlobalConfigController::class, 'speichereNummernkreise'])->name('admin.nummernkreise.store');
         
+        // 🎯 NEU: Geschützte Speicher-Route für Betriebsdefinitionen und GIS-Kartenparameter
+        Route::post('/konfiguration/betrieb/speichern', [GlobalConfigController::class, 'speichereBetriebsdaten'])->name('admin.betrieb.speichern');
+        
     });
+
 
 
     Route::group(['prefix' => 'finanzen', 'middleware' => 'can:check-permission,finanzen.view'], function () {

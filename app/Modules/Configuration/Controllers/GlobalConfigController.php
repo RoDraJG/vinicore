@@ -69,10 +69,37 @@ class GlobalConfigController extends Controller
                 }
             }
         }
+                // 🎯 SYSTEM-DROPDOWN: Automatische Selbstheilung für die globalen Anreden
+        $standardAnreden = [
+            'herr' => 'Herr',
+            'frau' => 'Frau',
+            'familie' => 'Familie',
+            'firma' => 'Firma'
+        ];
 
-        // Alle Zählwerke geladen und nach Modul & Kreis-Key gruppiert
-        $allKreise = CRMEinstellung::where('typ', 'nummernkreis')->orderBy('gueltig_von', 'asc')->get();
+        foreach ($standardAnreden as $code => $wert) {
+            if (!CRMEinstellung::where('typ', 'anrede')->where('code', $code)->exists()) {
+                CRMEinstellung::create([
+                    'typ' => 'anrede',
+                    'code' => $code,
+                    'wert' => $wert,
+                    'sortierung' => 0
+                ]);
+            }
+        }
+
+        // Alle Zählwerke laden und nach Gültigkeit markieren
+        $allKreise = CRMEinstellung::where('typ', 'nummernkreis')
+            ->orderBy('gueltig_von', 'asc')
+            ->get()
+            ->map(function ($kreis) {
+                // 🎯 NEU: Prüft mathematisch, ob das Zeitfenster bereits abgelaufen ist
+                $kreis->ist_historisch = $kreis->gueltig_bis && $kreis->gueltig_bis->isPast();
+                return $kreis;
+            });
+
         $nummernkreise = $allKreise->groupBy(['modul_key', 'kreis_key']);
+
 
         // 🎯 GIS-FARBEN: Lädt die gespeicherten Kartenfarben aus der Tabelle für das Register
         $einstellungen = CRMEinstellung::whereIn('typ', ['kartenfarbe', 'system'])
@@ -108,21 +135,120 @@ class GlobalConfigController extends Controller
             }
         }
 
-        // 2. Neuen historisierten Zeitraum hinzufügen
-        if ($request->filled('neu.kreis_key')) {
-            CRMEinstellung::create([
-                'typ' => 'nummernkreis',
-                'modul_key' => $request->input('neu.modul_key'),
-                'kreis_key' => $request->input('neu.kreis_key'),
-                'label' => $request->input('neu.label'),
-                'muster' => $request->input('neu.muster', '{ZAEHLER}'),
-                'zaehlerstand' => intval($request->input('neu.zaehlerstand', 0)),
-                'fuehrende_nullen' => intval($request->input('neu.fuehrende_nullen', 0)),
-                'gueltig_von' => $request->input('neu.gueltig_von') ? Carbon::parse($request->input('neu.gueltig_von')) : null,
-                'gueltig_bis' => $request->input('neu.gueltig_bis') ? Carbon::parse($request->input('neu.gueltig_bis')) : null,
-            ]);
+        // ======================================================================
+        // 2. NEUE HISTORISIERTE ZEITRÄUME (SCHLEIFEN-GETRIEBE FÜR KREIS-KEYS)
+        // ======================================================================
+        $neueKreise = $request->input('neu', []);
+        
+        if (is_array($neueKreise)) {
+            foreach ($neueKreise as $kreisKey => $daten) {
+                // Ein neuer Zeitraum wird NUR dann validiert und gebaut, wenn real ein Zählerstand eingetippt wurde!
+                if (!empty($daten['zaehlerstand']) || $daten['zaehlerstand'] === '0' || !empty($daten['muster'])) {
+                    
+                    $modulKey = $daten['modul_key'] ?? 'crm';
+                    
+                    // Prüfen, ob für dieses spezifische Zählwerk bereits Einträge in der DB existieren
+                    $existiertBereits = \App\Modules\CRM\Models\CRMEinstellung::where('typ', 'nummernkreis')
+                        ->where('kreis_key', $kreisKey)
+                        ->exists();
+
+                    // Wenn bereits ein Kreis da ist, wird das "Gültig von" zum harten Pflichtfeld!
+                    $regeln = [
+                        'zaehlerstand' => 'required|integer|min:0',
+                        'muster' => 'nullable|string|max:255',
+                        'gueltig_von' => $existiertBereits ? 'required|date' : 'nullable|date',
+                        'gueltig_bis' => 'nullable|date',
+                    ];
+
+                    // Validierung für diesen spezifischen Kreis-Datensatz ausführen
+                    $validator = \Illuminate\Support\Facades\Validator::make($daten, $regeln);
+                    if ($validator->fails()) {
+                        return redirect()->back()->withErrors($validator)->withInput();
+                    }
+
+                    $startZaehler = intval($daten['zaehlerstand']);
+                    $musterFallback = !empty($daten['muster']) ? $daten['muster'] : '{ZAEHLER}';
+
+                    // 🎯 UNZERSTÖRBAR: Wenn "Gültig von" leer ist, greift das System auf das heutige Datum (Carbon::now) zurück
+                    $vonInput = $daten['gueltig_von'] ?? null;
+                    $gueltigVon = !empty($vonInput) ? Carbon::parse($vonInput) : Carbon::now()->startOfDay();
+
+                    // Wenn "Gültig bis" leer ist, gilt es unbegrenzt bis zum fernen Zukunftshorizont
+                    $bisInput = $daten['gueltig_bis'] ?? null;
+                    $gueltigBis = !empty($bisInput) ? Carbon::parse($bisInput) : Carbon::parse('2099-12-31 23:59:59');
+
+
+                    // Datums-Parameter bestimmen: Leer = für immer (Carbon::now bis 2099)
+                    $gueltigVon = !empty($daten['gueltig_von']) ? Carbon::parse($daten['gueltig_von']) : Carbon::now();
+                    $gueltigBis = !empty($daten['gueltig_bis']) ? Carbon::parse($daten['gueltig_bis']) : Carbon::parse('2099-12-31 23:59:59');
+
+                    // 🎯 REVISIONS-SCHUTZ: Vorherigen offenen Zeitraum suchen und auf HEUTE deckeln!
+                    // Findet den bisher unbegrenzten oder aktuellsten Eintrag desselben Zählwerks
+                    \App\Modules\CRM\Models\CRMEinstellung::where('typ', 'nummernkreis')
+                        ->where('kreis_key', $kreisKey)
+                        ->where('gueltig_bis', '>=', Carbon::now()->endOfDay())
+                        ->get()
+                        ->each(function ($altesFenster) {
+                            $altesFenster->update([
+                                // 📅 Wird auf den heutigen Tag am absoluten Ende der Sekunde gesetzt
+                                'gueltig_bis' => Carbon::now()->endOfDay()
+                            ]);
+                        });
+
+                    // Neuen historisierten Zeitraum sauber einfügen
+                    \App\Modules\CRM\Models\CRMEinstellung::create([
+                        'typ' => 'nummernkreis',
+                        'code' => $kreisKey, 
+
+                        'wert' => strval($startZaehler),
+                        'modul_key' => $modulKey,
+                        'kreis_key' => $kreisKey,
+                        'label' => $daten['label'] ?? 'Zählwerk ' . $kreisKey,
+                        'muster' => $musterFallback,
+                        'zaehlerstand' => $startZaehler,
+                        'fuehrende_nullen' => 0,
+                        'gueltig_von' => $gueltigVon,
+                        'gueltig_bis' => $gueltigBis,
+                        'sortierung' => 0
+                    ]);
+                }
+            }
         }
 
-        return redirect()->route('admin.einstellungen', ['tab' => 'nummernkreise'])->with('success', 'Parameter permanent versiegelt!');
+        // Rücksprung zielt punktgenau auf den success-Flash-Key deiner globalen app.blade.php
+        return redirect()->route('admin.einstellungen', ['tab' => 'nummernkreise'])
+            ->with('success', 'Parameter permanent versiegelt und Zeitfenster harmonisiert!');
     }
+        /**
+     * 🎯 NEU: Versiegelt die visuellen GIS-Kartenfarben in der crm_einstellungen Tabelle
+     */
+    public function speichereBetriebsdaten(Request $request)
+    {
+        if (!auth()->user() || !auth()->user()->can('betrieb verwalten')) abort(403);
+
+        $farbFelder = ['farbe_eigentum', 'farbe_gepachtet', 'farbe_verpachtet'];
+
+        foreach ($farbFelder as $feld) {
+            if ($request->has($feld)) {
+                // Sichert oder aktualisiert den Farbwert in deiner Universal-Tabelle
+                \App\Modules\CRM\Models\CRMEinstellung::updateOrCreate(
+                    ['typ' => 'kartenfarbe', 'code' => $feld],
+                    [
+                        'wert' => $request->input($feld),
+                        'sortierung' => 0,
+                        'modul_key' => 'kataster',
+                        'kreis_key' => null,
+                        'muster' => '{ZAEHLER}',
+                        'zaehlerstand' => 0,
+                        'fuehrende_nullen' => 0,
+                        'gueltig_von' => null,
+                        'gueltig_bis' => null
+                    ]
+                );
+            }
+        }
+
+        return redirect()->route('admin.einstellungen', ['tab' => 'betrieb'])->with('success', 'Visuelle GIS-Kartenparameter erfolgreich im ERP versiegelt!');
+    }
+
 }

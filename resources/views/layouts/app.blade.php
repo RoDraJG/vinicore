@@ -141,6 +141,29 @@
                 @endauth
             </div>
         </header>
+        <!-- 🎯 GLOBALER TOAST-INJEKTOR: Fängt Erfolge UND scharfe Validierungsfehler ab -->
+        @if(session('success') || session('status'))
+            <div id="vinicoreToast" class="fixed top-20 right-6 z-50 flex items-center gap-3 bg-slate-900 border border-slate-800 text-white text-xs font-mono px-4 py-3 rounded-xl shadow-xl transition-all duration-300 transform translate-y-2 opacity-0">
+                <span class="text-emerald-500 font-sans text-sm">✅</span>
+                <div class="flex-1 font-medium tracking-wide">
+                    {{ session('success') ?? session('status') }}
+                </div>
+                <button type="button" onclick="SchliesseToast()" class="text-slate-400 hover:text-white font-bold font-sans text-sm bg-transparent border-0 cursor-pointer pl-2">&times;</button>
+            </div>
+        @endif
+
+        <!-- 🚨 NEU: DER FEHLER-TOAST (Zeigt Validierungsfehler sofort als edle Warnung an) -->
+        @if($errors->any())
+            <div id="vinicoreToast" class="fixed top-20 right-6 z-50 flex items-center gap-3 bg-red-950 border border-red-800 text-white text-xs font-mono px-4 py-3 rounded-xl shadow-xl transition-all duration-300 transform translate-y-2 opacity-0">
+                <span class="text-red-500 font-sans text-sm">⚠️</span>
+                <div class="flex-1 font-medium tracking-wide">
+                    @foreach($errors->all() as $error)
+                        <div>• {{ $error }}</div>
+                    @endforeach
+                </div>
+                <button type="button" onclick="SchliesseToast()" class="text-red-400 hover:text-white font-bold font-sans text-sm bg-transparent border-0 cursor-pointer pl-2">&times;</button>
+            </div>
+        @endif
 
         <!-- 🔒 DIE INHALTS-FLEXBOX -->
         <div class="flex-1 h-[calc(100vh-64px)] w-full overflow-hidden p-3 md:p-4 bg-bg-base flex gap-3">
@@ -240,6 +263,42 @@
             setTimeout(() => { map.invalidateSize({ animate: true }); }, 10);
         }
     };
+    /**
+     * 🎯 GLOBALER TOAST-PARSER: Schaltet die Animationen systemweit scharf
+     */
+    function InitialisiereGlobalenToast() {
+        const toast = document.getElementById('vinicoreToast');
+        if (!toast) return;
+
+        // Flüssiges Hereingleiten
+        setTimeout(() => {
+            toast.classList.remove('translate-y-2', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+        }, 50);
+
+        // Automatisches Zerstören nach 4 Sekunden
+        setTimeout(() => {
+            SchliesseToast();
+        }, 4000);
+    }
+
+    function SchliesseToast() {
+        const toast = document.getElementById('vinicoreToast');
+        if (!toast) return;
+
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-[-10px]', 'opacity-0');
+        
+        setTimeout(() => { toast.remove(); }, 400);
+    }
+
+    // Klinkt sich sauber in dein bestehendes DOMContentLoaded-Event ein
+    document.addEventListener('DOMContentLoaded', function() {
+        // Deine bisherige Sidebar- & Inspektorlogik bleibt hier unberührt...
+        
+        // Feuert das globale Feedback-System an
+        InitialisiereGlobalenToast();
+    });
 
 </script>
 </body>
